@@ -1,0 +1,9 @@
+The renegation tracking and sychronisation method specified in Section 3 of
+the design assumes that all implementations agree on a finite and moderately
+sized set of timeline servers that might once have been used.
+
+This is clearly very easy to achieve if, for instance, all implementations
+are willing to defer to one implementation on this question.
+
+It is an open question whether we need to support greater degrees of
+decentralisation.

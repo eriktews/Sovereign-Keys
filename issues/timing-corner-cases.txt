@@ -1,0 +1,128 @@
+If the timeline servers are willing to pause additions to their timelines for
+some time (or run their clocks slow), and collaborate with a Certificate
+Authority or a party in the DNSSEC hierarchy, they may be able to pretend to
+have registered new sovereign keys before the actual registrants.
+
+This attack requires very significant resources, and it must be performed
+early (when the SK is registered, rather than at any point later).
+
+Various protocol modifications could be made to place bounds upon how much
+"pausing" timelines could get away with, or to give SK registrants ways to
+cryptographically prove that this happened to them, or to perform distributed
+locking so that the attackers cannot watch legimitate writes and then pretend
+to have registered that name first.  It is unclear whether such
+modifications are worth the added complexity, given the corner case nature of
+the attack and the resources that are risked in performing it.
+
+(Notes from Jered mapping to this problem below...)
+
+Thoughts on UTC.
+
+The sovereign key system uses coordinated universal time (UTC) to define
+precedence for domain to key mappings and to audit timeline integrity. This is
+an appealing idea, since UTC is a well-known, independent external reference,
+and in theory many synchronization problems should reduce to accurate
+timekeeping.  In practice however, there are many issues around using UTC
+correctly.
+
+Monotonicity at one timeline server.
+
+Expecting timestamps to be monotonic at a single timeline server is dangerous.
+While rate slew time adjustment facilities like adjtimex(2) and adjtime(3) are
+common, gettimeofday(2) leap second handling varies between Linux and BSD at
+least, and the system clock may be set back manually or in a system failure.
+For example, after reboot a timeline server may be running with an RTC-set or
+even NTP-adjusted time earlier than one it has previously reported.
+
+A robust implementation should be resilient to timestamp sequence breaks.
+
+Sequence breaks may cause a timeline server to send inconsistent freshness, e.g.
+- At time t, the timeline has N records, followed by
+- At time t', the timeline has N+1 records, t' < t.
+Taken together these messages invalidate a timeline.
+
+Sequence breaks may also cause a timeline server to register entries with
+incorrect precedence, i.e. to insert into rather than append onto the timeline.
+
+A naive solution is to wait. Do not respond to any requests unless the current
+system time is newer than the newest reported or stored timestamp. This
+requires atomically storing and updating a newest timestamp before doing
+anything. There are serious DoS implications if a time far in the future is
+ever reported or stored.
+ 
+   : pde I like the "wait" solution.  If we are a timeline there are three
+   cases: (1) our clock is slighlty wrong for legitimate reasons; (2) our
+   clock is very wrong; (3) our clock is fine but some other timeline has a very
+   wrong clock, which may mean it's been compromised or something.  In case 1
+   waiting is correct; in case 2 the best action may be to raise errors or
+   something but waiting is at least safe; in 3 it would be best to proceed
+   with caution.
+
+A better solution is to maintain a locally consistent, monotonic time
+reference at each timeline server such as seconds since Nth process start
+using a monotonic counter of process starts, and a monotonic relative time
+reference such as clock_gettime(3) with CLOCK_MONOTONIC. These local
+timestamps can be used to check integrity and precedence for that timeline. An
+observer may also verify that they are always increasing. Best estimate UTC
+timestamps could still be stored and sent along with these timestamps to
+provide some assurance of recency, without permanently invalidating a
+timeline.
+
+Global consistency.
+
+The system needs to order events between distributed timeline servers. UTC seems
+attractive for collation because each timeline server can be updated
+independently, and Internet hosts can track a UTC reference to +/-0.2s, which
+intuitively seems close enough.
+
+One problem is the timeline server with the slowest clock gets precedence when a
+registration is contested, which incentivizes bad timekeeping. A larger problem
+is that only a single time measurement at a single timeline server tracks
+precedence, and registrants have no way to verify or contest this measurement.
+A still larger problem is that, prior to collation, there is no way to know if
+a new domain to key mapping has precedence on some other timeline server.
+
+An interesting notion is to maintain a logical clock to establish a
+happened-before relation using message passing between timeline servers. Doing
+this synchronously probably assumes some knowledge of the topology of timeline
+servers which it would be better not to assume. But it might be possible to
+sample the correlation between timeline times to bound inconsistency.
+
+If timeline A sees freshness updates from B, it can deduce that timestamp tb0
+happened before its current timestamp ta0 and include a statement of this in
+its own freshness. Any registrations before tb0 precede those after ta0. From
+pairwise combinations of such facts, a mirror should be able to deduce
+precedence to within the resolution of its freshness samples. When there is
+ambiguity, we might prefer a tiebreaker such as longest timeline length rather
+than lowest timestamp.
+
+If we also have the property that a timeline consistent with another timeline at
+some time implies that it incorporates all those records, and are assured that
+updates to a timeline are self-consistent, we could provide bounds on the window
+in which an inconsistency with a previously seen timeline may be present...
+
+TODO... flesh this out some more.
+
+Miscellaneous.
+
+Atomicity and freshness at one timeline server.
+
+A timeline server must report freshness, timeline length N as of a recent time
+T.  Writes queued for the store with timestamps t < T may land after T or
+never. So when computing freshness at T, a careless implementation may
+under-report (fail to count queued writes that will succeed), or over-report
+(count queued writes that will fail) timeline length, and thus invalidate the
+timeline.
+
+To be safe, an implementation should compute freshness updates atomically under
+hard locks. For example:
+1. Flush the store queue. Block new requests and commit all pending writes.
+2. Query the maximum committed serial number N.
+3. Read current timestamp T.
+4. Update freshness with (T, N).
+
+Also:
+Previously a timeline has reported it has N entries as of time T, but a merged
+timeline may have 2N entries as of time T according to the timeline itself. This
+requires that freshness be computed always with reference to the current
+monotonic timestamp, not the newest stored timestamp.

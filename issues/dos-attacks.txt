@@ -1,0 +1,86 @@
+A. Denial of Service Attacks by writing to the Timeline.
+
+Although we can reasonably assume that all mirrors have, say, 3TB of disk
+space, a great deal more than required for active sovereign keys in the
+foreseeable future, the possibility of attacks that might consume that space
+and force the mirrors to store terabytes of junk indefinitely is serious.
+
+Some of the kinds of evidence for sovereign keys can easily be generated for
+an unbounded number of names.  For instance, if I have example.com, I can use
+DNSSEC to register a.example.com, b.example.com, ... aa.example.com,
+ab.example.com ... , etc.  The registration of this kind of stream of
+sovereign keys (from within just example.com or perhaps a very large set of
+domains) would constitute a problematic denial-of-service attack against
+mirrors' supply of disk space.  
+
+This kind of unbounded enumeration is normally more expensive for trusted
+CA-signed evidence, but the attacks could still be performed by CAs, or by
+attackers who compromise a CA.
+
+AVAILABLE MITIGATION MEASURES
+
+  1. Restrict (DNSSEC) sovereign key registrations from freely enumerable
+  portions of the DNS hierarchy.
+
+  Only allow free, unlimited sovereign keys from those portions of the DNS space
+  where we are sure that registration fees apply.  The characterisation of
+  those subsets of DNS space will be an ongoing project.  For instance, if the
+  Libyan government started an enumeration attack, .ly would have to be
+  removed from this list.
+
+  Allow paid sk registrations outside of that portion of DNS space and/or
+
+  2. Allow sovereign key registrations in freely enumerable portions of
+  the DNSSEC hierarchy with a (paid) CA certificate.
+
+  3. Allow sovereign key chaining.  By this mechanism a sovereign key for
+  example.com can delegate to a.example.com, but this happens in X509 chains
+  and not on the timelines.  New users of a.example.com do not get full
+  protection against attacks by example.com.
+
+  4. Rate limit new entries on Timelines.  This is not a solution so much as a
+  way to buy time while figuring out which DNS registries/DNS registrars/CAs a
+  DOS is coming through and how to mitigate it.  A collective rate limit of
+  5GB/day would allow 2.5 million sovereign keys per day, significantly more
+  than the current number of domains registered each day, while providing up
+  to 600 days of attack-resistance.
+
+The best solution is probably using all four of these measures simultaneously.
+3 is probably the most complicated from an implementation perspective.
+
+COST OF ATTACK UNDER SUCCESSFUL MITIGATION
+
+Supposing that the design succeeds in requiring DOS attackers to pay for
+something (a domain registration or CA certificate) for each new sovereign key
+they write to a timeline.  Assuming that attackers must pay $5 for a 2kB
+timeline entry, the cost of filling a 3TB mirror is ~$8 billion.  At that
+point we could ask Verisign to purchase nice new raid arrays for all existing
+mirror operators ;).
+
+B. Denial of Service Attacks against Timeline Server bandwidth
+
+Timeline servers can perform all of their operations over TCP.  This prevents
+asymmetrical DOS attacks, but is far from sufficient.
+
+Timeline servers need to remain available for the purposes of communication
+with each other and updates to important mirrors.  Timeline servers should
+therefore maintain a QOS priority arrangement that exchanges traffic with
+other timelines before anything else, and with known mirrors in good standing
+before unknown mirrors and clients.
+
+C. Denial of Service Attacks against Mirrors
+
+Unlike Timeline servers, which need only sign a new Timeline Freshness
+Message from time to time, the protocol requires that Mirrors sign their
+responses to each client's query.
+
+This is a potential DOS mechanism, because even asymmetric key signature
+operations are expensive.
+
+One mitigation is that the protocol supports an unbounded number of cheap
+mirrors.  Mirrors may be configured to only serve, or preferentially serve, a
+bounded client base (such as the subscribers at a particular ISP).  
+
+However, mirrors can cache responses to the most frequent queries they are
+receiving (for instance, <what are the updates for facebook.com since X>,
+where X is the last time facebook updated its sovereign key).

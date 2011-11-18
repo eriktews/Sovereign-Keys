@@ -1,0 +1,68 @@
+Transitional Considerations
+
+In some hypothetical future state of the world, one might imagine that parties
+purchasing domain names would also create sovereign keys for them at the same
+time (or have their choice of service provider do so for them).  In the mean
+time, however, it is necessary to consider how sovereign keys can be created
+for some existing domains in an orderly fashion.
+
+1. Protecting the Holders of Compromised Webservers against Sovereign Key
+Creation
+
+Today, an attacker who compromises a victim's DNS or web servers is able to
+obtain or create PKIX-certified private keys or DANE DNSSEC-signed private
+keys for the victim domain.  This is of course bad, but is presently a
+somewhat-recoverable situation.  If the attacker used these ingredients to
+create herself a sovereign key for the victim's domain, the attack might be
+more-or-less permanent.  This is clearly very bad.
+
+The Sovereign Key protocol offers domain holders a way to proactively protect
+against this sort of situation (create a sovereign key with no protocols
+registered for it, and store that key offline).  However only domain holders
+who have taken this step, or those who have created real operational sovereign
+keys, can benefit from this method.
+
+Mitigation of the risk to unknowing domain holders will require extra steps
+during the period of transition to sovereign key usage (which may be long).
+During this period, timeline servers SHOULD apply the following additional
+criteria before allowing a sovereign key to be created:
+
+  a. Check that the HSTS header is set for this domain, and that the HTTP
+     homepage of the domain redirects to HTTPS.  Check this from a number of
+     network endpoints, with a number of different client device types.
+     This is intended to greatly reduce the number of domains for which
+     sovereign keys can be created, to a group that have demonstrated a
+     knowledge of competent contemporary HTTPS server administration.
+
+     Attackers can of course enable HSTS on compromised webservers, but on
+     the overwhelming majority of existing domain names, such an action would
+     be highly visible to the webmaster, leading to breakage and
+     investigation.
+
+  b. Check for the presence of https://www.domain.com/request-for-sovereign-key.txt
+     (this precise contents of this file will be specified, but it will be
+     something like "I, the administrator of domain.com, hereby request that
+     a sovereign key be created for domain.com.  I understand that losing this
+     key means loss of control of this domain.  I promise that I have
+     three backups of the private key.  My requested public key is as follows:
+
+     <base 64 encoded key/key hash>
+
+     <link to Wikipedia or other multilinugal documentation on sovereign
+     keys>) over a two-week period before registration is signed.  This is
+     intended to provide some comparatively solid evidence to the
+     administrators of compromised webservers about an attacker's attempt to
+     create a sovereign key for their domain.
+
+  c. Over the two weeks prior to registration, send a number of notification
+     emails to the domains's WHOIS technical contact, addresses listed in its
+     X.509 end-entity certificate, and webmaster address, confirming the SK
+     request, pointing out the URL above, and offering a cancellation link.
+
+It will be an empirical question whether these methods are sufficient to make
+successful sovereign key creation attacks rare.  Drastic methods are available
+if these incidents are too common.  One would be blacklists included in client
+source code.  Another would be having clients poll (SafeBrowsing style) a
+list of cancelled sovereign keys; such a list would need to be cross-signed
+by a lot of parties in a lot of jurisdictions.
+

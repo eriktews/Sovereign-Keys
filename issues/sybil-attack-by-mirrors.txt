@@ -1,0 +1,9 @@
+In the algorithm specified in Section 4.b., there is a possible Sybil attack
+which could occur if an attacker could add mirrors to the GOOD_MIRRORS list
+faster than the client could notice them being bad.
+
+The 4.b. algorithm could have an extra failure case to prevent this
+(having failure for one name entail failure for all names would achieve this).
+
+The alternative is to police the GOOD_MIRRORS list in some way that is
+minimally rate limiting.
