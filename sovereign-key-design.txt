@@ -1,0 +1,657 @@
+Sovereign Key Cryptography for Internet Domains
+
+This document describes a method for implementing persistent, secure
+associations between Internet domain names and public keys.  The method
+bootstraps from and reinforces existing PKI techniques, such as trusted CA
+certificates or DANE DNSSEC entries, to create `Sovereign Keys' which
+are persistently associated with names. 
+
+This document sets out the design of the Sovereign Key system, but is not
+presently a complete specification.  For instance, it indicates the types and
+semantics of variables and protocol messages, but does not necessarily specify
+the encodings and file formats that must be used to transmit or sign them.  It
+indicates a number of numerical parameters for the protocol, but does not
+necessarily specify values that should be used for all of them.
+
+Readers who are interested in the comparative features and design objectives
+of this proposal and contemporary alternatives, may wish to read Appendix A
+before continuing.
+
+0. What are Sovereign Keys useful for?
+
+0.a. Robust protection against "man in the middle" and server impersonation 
+     attacks, including CA-certified or DNSSEC-signed attacks
+
+We propose that if a sovereign public key is registered for a particular
+service (eg, HTTPS or SMTPS) on a particular domain, clients for that service
+which understand Sovereign Keys MUST verify that operational public keys
+(e.g., those at the end of X.509 certificate chains) have been cross-signed by
+the Sovereign Key.  If they cannot verify a signature from the Sovereign Key
+over the server's key, the client MUST refuse to transmit data to that server
+and MAY warn the user that a verified connection cannot be established.  If a
+client observes a Sovereign Key for a domain and protocol, the client MUST
+also refuse to communicate over insecure variants of the registered protocols
+(HTTP, SMTP, etc).
+
+0.b. Circumvention of attacks
+
+User interface research has shown that it insufficient to warn users about the
+presence of a server impersonation or man-in-the-middle attack.  A large
+fraction of users will click around multi-step certificate warnings,
+especially if that is the only way for them to get to their destination
+[http://lorrie.cranor.org/pubs/sslwarnings.pdf,
+http://research.microsoft.com/en-us/um/people/cormac/papers/2009/SoLongAndNoThanks.pdf].
+With Sovereign Keys, the certificate warning interface MAY be removed, and
+replaced with code that automatically routes around server impersonation,
+man-in-the-middle, and connection blocking attacks.
+
+The recommended method for attack circumvention is to compute a SHA1 sum of
+the Sovereign Key, producing a Tor .onion "hidden service" address, and to
+connect to that.  Other methods, such as employing proxies or VPNs to
+circumvent the attack, are also possible.
+
+
+1. Timeline Servers
+
+The Sovereign Key system involves a set of N (10-30) timeline servers. N
+should be chosen to provide some diversity of jurisdictions, operational
+philosophies and security implementations, and ideally to provide these
+properties even if some of the servers are compromised/disabled.  N should not
+be too large because the messages discussed in Section 4.a. will become
+correspondingly large, and because the risk of dereliction as described in
+4.b. increases.  These servers store verifiably read- and append-only data
+structures in which the mappings between names and sovereign public keys are
+stored.  
+
+The reason these data structures are append-only is to ensure that once a
+Sovereign Key has been legitimately claimed for a particular name, no other
+other subsequent claimant can alter the original claim, even if they
+compromise a CA or a portion of the DNSSEC hierarchy.  Append-onlyness is
+ensured by having the server sign an incrementing serial number and a
+monotonically increasing timestamp as part of each timeline entry.  Violation
+of the timestamp monotonicity and serial number uniqueness properties of a
+timeline server is detectable, and will cause all clients to cease trusting
+the timeline server immediately, as described in Section 3 below.
+
+The timeline servers exist for the sole purpose of recording and preserving a
+correct history of claims to Sovereign Keys.  Clients believe the oldest claim
+to a key for any given name plus any self-signed updates it has subsequently
+published (which include revocations, renewals and other adjustments, all of
+which are discussed below).  Claiming a key for a name requires evidence of
+control in the DNS (either a CA-signed certificate or a key published by DANE
+DNSSEC).
+
+Clients can access claims to Sovereign Keys so long as 1 of the N timeline
+servers remains intact.  In practice, clients do not usually query the
+timeline servers directly; instead, they query one of M comprehensive mirrors
+of the timelines (M >> N).
+
+Each timeline server possesses a unique private/public key pair.  The public
+keys of the timeline servers are shipped with clients, so that clients can
+verify the authenticity of timeline entries. 
+
+A claim to a new Sovereign Key that is stored in the timeline contains the
+data listed below; the table also lists the estimated efficient compressed
+storage/transmission size in bits.
+
+PURPOSE             TYPE        FIELD              ESTIMATED ENTROPY (BITS)
+--------------------------------------------------------------------------------
+Monotonicity        uint64_t  : serial number      0
+                    uint64_t  : timestamp          25
+--------------------------------------------------------------------------------
+Sovereign Key       char[256] : name               50
+                    bool      : wildcard           1
+                    char[]    : key type           0.5
+                    char[]    : sovereign_pubkey   224-256 (assuming ECC)
+                    char[]    : protocols          10
+                    uint64_t  : expires on         25
+--------------------------------------------------------------------------------
+In case of          char[][]  : inheriting name(s) 50 
+revocation
+--------------------------------------------------------------------------------
+Evidence            char[]    : cacertchain        9000-1300 (256 for a hash)
+for claim           char[]    : DNSSEC_evidence    ?
+                    char[]    : claim_signature    1024-2048 (required, see below)
+--------------------------------------------------------------------------------
+Timeline signature    char[]    : signature          224-256
+
+When compressed, a Sovereign Key backed by 1024 bit RSA evidence is about 1300
+bytes, while one backed by 2048 bit RSA evidence is about 2000 bytes.
+
+The "evidence for claim" fields are a CA-signed DER-encoded X.509 certificate
+associating the name with the Sovereign Key, or DANE DNSSEC evidence
+associating the name with the Sovereign Key, if that is available for this
+TLD.  These show that at the time of entry to the timeline, the
+sovereign_pubkey was genuinely associated with the name.  The timeline server
+MUST verify that the X.509 certificate or DANE DNSSEC response is valid at the
+time the Sovereign Key is created (though clients MAY verify this for
+themselves in the future, too).
+
+The timeline server MUST verify the OCSP status of the X.509 certificate before
+issuing the Sovereign Key, but (in order to save space) the protocol does not
+require that the OCSP response be included in the evidence field.
+
+The claim signature protects against attacks such as the timeline server
+modifying the wildcard field or spontaneously issuing a Sovereign Key from any
+valid X.509 cert it finds.  The public key in the X.509 cert may be equal
+to the sovereign_pubkey, in which case claim_signature is a self-signature.
+It may also be different, which is useful if, for instance, you want to use an
+ECC Sovereign Key but your CA won't issue a certificate for it.  We expect
+this to be the common case.
+
+The "inheriting names" are the names of other Sovereign Keys that may be used
+to adjudicate the creation of a new Sovereign Key in case the first is
+compromised and subsequently revoked.  Parties creating Sovereign Keys could
+list any zero or more names: "verisign.com", "business.ru", "aclu.org", etc.
+The holders of the Sovereign Keys for these /other/ names would inherit the
+ability to re-register the name if and only if a self-signed sovereign
+revocation occurs (revocation and related concerns are discussed later in this
+section and in Section 6 below).
+
+The "wildcard" flag is an optimisation.  Some names may wish to 
+issue distinct Sovereign Keys for their subdomains.  In that case, the
+wildcard bool should be FALSE.  If the wildcard bool is TRUE, then this
+Sovereign Key is valid for all subdomains of "name".  For instance a wildcard
+Sovereign Key for eff.org speaks for a.eff.org, a.b.eff.org, etc.  Note that
+wildcard and non-wildcard Sovereign Keys may not coexist for any portions of
+the DNS namespace, but that wildcard Sovereign Keys will be capable of other
+sorts of delegation of authority for operational purposes, as discussed in
+Section 5 below.
+
+The "protocols" field is a list of strings ("https","smtps","imaps",etc)
+denoting the services that must be cross-signed by the Sovereign Key on this
+domain.  A service may optionally have a port number designating a
+non-standard port for that service (eg, "https:8080").  The protocols field
+may also contain the value "all", in which case clients should always expect
+services on this domain to be authenticated with the Sovereign Key.
+
+The timeline's signature is computed over and authenticates all of the
+fields.  Such signatures may be performed offline.
+
+Compressed timeline entries are ~1.5kB (without an OCSP response in the
+evidence). Sovereign Keys for the 2 x 10 ^ 8 domains currently in existence
+could be stored on a timeline in around 300GB of disk space.  
+
+Timelines may also contain three other kinds of entries:
+
+* Incorporation-by-reference of other timeline servers' entries
+
+The timeline servers might have their private keys compromised or revoked, in
+which case they will die.  In order to make Sovereign Keys robust against such
+events, a client registering a new name with one timeline server should request
+that others incorporate a copy of the registration by reference.
+
+Incorporation by reference is a timeline entry of this form:
+
+   Serial number
+   Timestamp
+   Other timeline's name/id
+   Serial number of other timeline's entry
+   Hash of other timelines's entry
+   Timeline signature
+
+The timeline server MUST cache a copy of the other timeline's entry when it
+performs incorporation-by-reference.
+
+* Revocations:
+
+   Serial number
+   Timeline Timestamp
+   Time of revocation       }
+   Sovereign Key name       }  Provided by Sovereign Key holder
+   Sovereign Key signature  }
+   Timeline signature
+
+
+* Reissuance of revoked names
+
+   Serial number
+   Timestamp
+   New Sovereign Key fields 
+   Future "in case of revocation" fields
+   Evidence (signature from a previous "in case of revocation" name)
+   Timeline Signature
+
+Timelines MUST NOT accept a reclamation unless they include or
+incorporate-by-reference a revocation of the old Sovereign Key.
+
+* Alterations of protocols
+
+   Serial Number
+   Timestamp
+   Name                             }
+   New value for Protocols field    }   Provided by Sovereign Key holder
+   Sovereign Key Signature          }
+   Timeline Signature
+
+For DOS-prevention purposes, timeline servers must not accept more than a
+certain number of revocations or protocol alterations for a Sovereign Key per
+unit time.  The values of these parameters are to be determined (eg 5 protocol
+alterations per month, or start with a budget of 5 allowed alterations, and
+replenish this by one per fortnight).
+
+* Alterations of the Timeline's Trust Root
+
+Timeline servers SHOULD copy and update their list of trusted Certificate
+Authorities from one of the major client libraries.  Timeline servers MUST
+publish a record of which root CAs they trust over time, using the
+following timeline entries:
+
+  * This timeline server trusts a new root Certificate Authority
+
+    Serial Number
+    Timestamp
+    Certificate Authorities DER-encoded X.509 certificate
+    CA Update Serial Number
+    Timeline Signature
+
+  The "CA Update Serial Number" is a 2 byte number that begins at zero and is
+  incremented by one every time the timeline notes that it is adding or
+  removing a trusted root CA.
+
+  * Removal of trusted root Certificate Authority
+
+    Serial Number
+    Timestamp
+    Serial Number of this CA when first added to this timeline
+    Secure hash of root CA certificate
+    CA Update Serial Number
+    Timeline Signature
+
+2. Mirroring Timelines
+
+Mirrors exist for performance and reliability reasons.
+
+Mirrors keep full, up to date copies of all the trusted timelines.  A mirror
+SHOULD be bootstrapped by BitTorrent, hard-disk-over-snail-mail, or a similar
+bulk data distribution mechanism that does not require a large download from
+the timeline servers.  Data storage is cheap enough that a $100 disk will
+have plenty of room for a mirror server for the foreseeable future.
+
+Mirrors are identified by an IP address, a port number, and a public key.
+
+Timeline servers must respond to mirror queries of the form "send me all of your
+timeline entries since Serial Number S".  Appended to that response should be a
+Timeline Freshness Message (TFM):
+
+Timestamp
+Highest Serial Number to Date
+Highest CA update Serial Number to Date
+Timeline Key Signature
+
+A mirror (or a client) might observe a timeline server to have "reneged".  This
+occurs if:
+
+ - the mirror or client sees two different signed entries on the same timeline
+   with the same serial number, or 
+
+ - two different entries on the same timeline that violate timestamp
+   monotonicity (ie a signed entry with a higher serial number but a lower
+   timestamp), or 
+
+ - a timeline freshness message with a lower timestamp and higher serial
+   number than a previously-observed entry on that timeline, or
+
+ - an entry for a new Sovereign Key that is not validly signed by a chain from
+   one of the timeline's root CAs or by a chain from the DNSSEC root
+
+If a mirror observes a timeline to have reneged it MUST:
+
+ - Store a copy of the contradictory signed timeline statements
+ - Cease trusting that timeline server
+ - Add this reneged information to a structure of bad timeline servers, which
+   can be queried by clients
+
+3. Renegation Tracking and Synchronisation
+
+Protocol messages contain a "renegation tracking" field.  This 32 bit number
+are the low order bits of a secure hash of the list of previously-trusted
+timeline servers that this mirror or client knows to have reneged.  If a client
+or mirror receives a message with a renegation tracking number that is
+different to its own, it MUST enter a renegation synchronisation phase of the
+protocol (if renegation synchronisation fails with a given peer, the client or
+mirror is not obliged to repeat synchronisation with that peer).
+
+ [Aside: the design above assumes that implementors can agree on a master
+ repository of timeline servers that are or were once in use.  We do not believe
+ this is a problematic requirement, but alternative suggestions are welcome]
+
+Renegation tracking involves sending a list of the timelines that this
+client/mirror believes to have reneged; the peer replies with a list of
+addition timelines that it believes to have reneged, along with the evidence
+that renegation occurred, and a list of requests for evidence.  The initiating
+client/mirror then replies with evidence of renegation for the renegations the
+peer did not know about.  At the end of this process, both participants should
+have the same list of reneged timelines (and the same renegation tracking
+field).
+
+4. Querying Timeline Mirrors
+
+4.a. Queries to Mirrors
+
+Clients query one of the M comprehensive mirrors of timelines with a query
+that asks "what are all the timeline entries that pertain to name X since
+entry Y?"   The mirror replies with a response saying "as of time T, I have
+the following entries on various timeline servers pertaining to X: <list of
+entries> <list of relevant Timeline Freshness Messages>".  This message is
+signed by the mirror's key.  For performance reasons, clients which have
+already cached the history of X may use an alternative query form,  "what
+timeline entries for name X have appeared since these? [(timeline ID,
+entry),(timeline ID, entry) ..] ".
+
+  [Note that the size of this server response is fairly large because of the
+  TFMs.  For 20 timeline servers with 224 bit ECDSA keys and an efficient
+  encoding for the other data in the TFMs, the TFMs would take up about 1200
+  bytes.  For 30 timeline servers with 256 bit ECDSA and naive 8 byte encodings
+  for timestamp and timeline entry numbers, the TFM response overhead would be
+  2400 bytes]
+
+4.b. Satisfactory Mirror Responses
+
+Clients SHOULD use the following (Pythonic pseudocode) algorithm for querying
+mirrors:
+
+T1 = 24 hours    # No querying necessary if records are fresher than this
+T2 = 48 hours    # 24-48 hours: acceptable, but query proactively
+T3 = 1 week      # Records older than an week are bad news, though we will
+                 # somewhat tolerate a small number of dysfunctional timelines 
+                 # in this state
+T4 = 2 weeks     # Once a few timelines reach this age, we fail open
+
+MAX_DERELICT_TIMELINES=2    # Timelines are derelict if nobody is seeing updates
+                          # from them.  We will tolerate this number of them
+
+N_RETRIES=5      # Number of mirrors to try if we aren't getting fresh enough
+                 # responses
+
+number_fresh=0
+for s in timeline_servers:
+    if s.entries_for_name(name).freshness > getcurrenttime() - T1:
+      number_fresh +=1
+if number_fresh == len(timeline_servers):
+    return SUCCESS
+
+for n in range(N_RETRIES):
+  
+   # START_QUERY_ATTEMPT
+   if len(GOOD_MIRRORS) == 0:
+     return FAILURE
+   m = random.choice(GOOD_MIRRORS) # clients MAY prefer mirrors which are 
+                                   # provided by their ISP or network, or 
+                                   # may select from a global list
+   response = m.query(name)
+   number_fresh_enough = 0
+   number_stale = number_very_stale = 0
+   for s in timeline_servers:
+       s.entries_for_name(name).update_from_response(response)
+       freshness = s.entries_for_name(name).freshness
+       if freshness < m.best_freshness_observed_for_timeline(s):
+           # This mirror just gave us a /less/ fresh response for this name 
+           # than it  had done for some other name.  Never use it again.
+           GOOD_MIRRORS -= m
+           goto # START_QUERY_ATTEMPT
+
+       lag = getcurrenttime() - freshness
+       if lag < T2:
+           number_fresh_enough += 1
+       else:
+           if lag > T3:
+             number_stale += 1
+           if lag > T4:
+             number_very_stale +=1
+       
+       if (number_fresh_enough >= len(timeline_servers) * 0.8) AND 
+          (number_stale <= MAX_DERELICT_TIMELINES):
+           return SUCCESS
+
+if number_very_stale > MAX_DERELICT_TIMELINES:
+    # If 3 or more non-reneged timeline servers have not been updated for 2
+    # weeks, we are under successful attack.  Fail open.  
+    return FAILURE
+else:
+    return SUCCESS
+
+
+Clients SHOULD cache the responses they get from mirrors, and MUST check that
+mirror replies are consistent with these cached entries.  If a mirror provides
+a response whose contents omitted entries for the queried name X that predate
+the relevant freshness messages and are cached by the client, the client MUST
+stop trusting this mirror.
+
+4.c. Privacy Considerations When Querying Mirrors
+
+Clients' queries to mirrors raise privacy issues that are similar to those
+raised by queries to DNS servers.  Because the wire format will be TLS or a
+UDP protocol that provides confidentiality, there will be slightly better
+privacy with respect to network attackers; however, the mirror is in a
+position to learn which IP address is querying which name.
+
+A minimal way to address this would be to have ISPs run mirrors much as they
+tend to run DNS recursive resolvers.  However there is the option of doing
+better if we add the following: 
+
+  mirrors SHOULD listen on port 443 and on a special SK mirror port <MP>.
+
+  Clients may send a mirror a request to proxy in place of a normal query.  If a
+  mirror receives such a request for a mirror server on port <MP>, it MUST make
+  forward the connection to the requested mirror on that port.
+
+4.d. Performance Considerations When Querying Mirrors
+
+Superficially, the query to mirrors may appear increase the latency of TLS
+connections.  However, this should only be true in corner cases, for the
+following reasons:
+
+  1. When setting up a TLS connection to a service, clients must make at
+  minimum three network roundtrips: a DNS query, the three way TCP handshake,
+  and a TLS handshake (ignoring the possible roundtrips for DNS recursion and
+  OCSP).  This happens in parallel with Sovereign Key operations, not in
+  series.
+
+  If the client queries a mirror, it must make at least 1 roundtrip (over UDP
+  or a persistent TLS connection) and possibly 3 roundtrips (for a new TLS
+  connection) to fetch a Sovereign Key history.  No blocking of communications
+  occurs unless this operation is still in progress once the main TLS client
+  connection is ready to send encrypted data.  So, provided the latency of the
+  Sovereign Key query is less than or equal to the latency of establishing the
+  TLS session in the first place, it will add no further latency.  With
+  nearby, high-performance mirrors this could be achieved with TLS; with a
+  lighter-weight UDP protocol or persistent TLS connections it could be
+  achieved with slower, more distant mirrors.
+
+  2. The common case is that clients only query mirrors for a given name at
+  most once every 24 hours, in order to check for Sovereign Key revocations.
+
+  3. The algorithm described in Section 4.a. can trigger up to five queries to
+  mirrors.  This should not be normal: this case only applies when the client
+  is talking to out-of-date mirrors (it should find better ones) or if several
+  (3 or more) of the timeline servers has experienced an outage of a week or
+  more.
+
+5. Use of Sovereign Keys on TLS servers
+
+As discussed in the introduction, the first use for Sovereign Keys is as an
+alternative, more reliable method of verifying the keys used by TLS servers.
+This requires that the operational key be cross signed by the sovereign
+private key, in parallel with existing (PKIX/DNSSEC) key verification
+methods.  The Sovereign Key may also be used to cross-sign a CA certificate
+that chains to the operational end-entity certificate; one reason for doing
+this is that it enables a wildcard SK for a large operational domain to
+delegate to private CA keys for subdomains.
+
+At present we believe the best method for cross-signature will be to append
+an addition certificate to the X.509 chain.  This should not be a real
+certificate, but simply a data storage method for the cross signature.  We
+will need to register a new OID for an X509 v3 extension to store the
+cross-signature.  The Subject, Issuer, Key, etc in this certificate can be
+anything (and should therefore be brief).  If CAs cooperate with the sovereign
+key system, they could add the cross-signature extension to existing
+end-entity certificates, thereby avoiding the need to append an extra
+certificate to carry the cross-signature.  CA cooperation is not required, of
+course.  
+
+Certificates that carry cross-signatures from Sovereign Keys may also point to
+OCSP servers, which allow the Sovereign Keys to revoke operational keys if
+desired.  Alternatively, these certificates can have short validity windows,
+and they can be deployed on a rapidly rotating basis.
+
+A client performing certificate verification that knows about Sovereign Keys
+MUST default to bypassing other host authentication mechanisms if (1) it
+observes a Sovereign Key certificate in the chain presented by the server or
+(2) it has previously observed and cached a Sovereign Key for this name and
+protocol combination.
+
+6.  Operational Considerations Related to Key Loss and Revocation
+
+Because the Sovereign Key design allows domain operators to reduce the number
+of third parties who can launch attacks against their services to zero, it has
+the property that if a domain holder /loses/ their sovereign private key, they
+will probably lose the ability to switch to new operational keys, or may even
+lose control of their domain, until the Sovereign Key expires!
+
+Several measures and strategies are recommended to minimise this risk.
+Overall, these measures should err on the side of exposing the private key to
+being copied by attackers (which is a recoverable situation) instead of losing
+all copies of the private key (which may not be recoverable before expiry).
+
+We believe there are at least two workable approaches for domain holders:
+relying on service providers to prevent key loss, or storing multiple backups
+themselves.
+
+If the domain holder selects a service provider that they are willing to
+trust, this third party can escrow and back up their keys, manage revocation
+and reissuance, etc.  For many domain holders this will be the preferred
+option.
+
+If the domain holder wishes to manage their own Sovereign Keys, they must
+ensure that they have sufficient backups to mitigate the risk of domain loss
+via Sovereign Key loss.  Server setup software which generates and registers
+Sovereign Keys SHOULD make at least three redundant backups of the sovereign
+key before it is transmitted to a timeline server.  Good vectors for backups
+could include local mass storage devices, scp'd copies, email copies, or
+printed hardcopies.  
+
+7. Governance
+
+Because the most essential security properties in the Sovereign Key design are
+cryptographically verified within the protocol, the degree of governance this
+mechanism would require is lower than for other security-affecting Internet
+infrastructures, such as the X.509 Public Key Infrastructure or the Domain
+Name System.
+
+Nonetheless, a governance mechanism may be required to:
+
+- monitor timeline servers' compliance with requirements that are not verified
+  within the timeline itself (such as preservation and checking of OCSP
+  responses during SK registration, or running ntpd to maintain a reasonably
+  accurate clock).
+
+- monitor timeline servers' availability and their ability to push updates to
+  mirrors satisfactorily.  If a timeline server is close to becoming derelict
+  (per Section 4.b), notify client implementors so that they can release
+  updates disabling it.
+
+- maintaining a master list of all of the timeline servers that have ever been
+  trusted by deployed implementations of the protocol, for the renegation
+  tracking purposes discussed in Section 3.
+
+- maintain a list of TLDs where unbounded free registration is documented or
+  from which timeline-writing DOS attacks have been observed, and a list of
+  Certificate Authorities which issue unbounded free certificates or which
+  have signed timeline-writing DOS attacks (see issues/dos-attacks.txt)
+
+8. Other Operational Considerations
+
+A number of operational and implementation issues are presently
+discussed in separate documents in the issues/ directory.
+
+APPENDIX A: FEATURE COMPARISON TO OTHER PROPOSALS FOR MITIGATING ATTACKS ON
+TLS VIA CAs
+
+A.1. Compared to publishing keys or key hashes in HTTPS headers
+
+Various proposals have been made to publish commitments about future TLS
+certificate chains via an HTTPS header.  These proposals come in different
+flavours: one could commit to use a particular set of trusted CAs, or to some
+other key that (much like a Sovereign Key) will be used to cross-sign whatever
+operational keys this domain will use in the future.
+
+Depending on which flavour of HTTPS header one is discussing, the SK design has
+the following advantages:
+
+- It works for SMTPS, IMAPS, POPS, XMPP, and other non-HTTP protocols
+
+- An attacker who briefly compromises a webserver may not issue a header which
+  causes clients to cease trusting the legitimate server for an indefinite
+  period of time (this is most true if the domain already has a
+  Sovereign Key; see also issues/transitional-considerations.txt).
+
+- Clients are not vulnerable to attacks upon first connecting to a domain, a
+  consideration that is especially important for smaller domains and in places
+  where Internet cafes remain an important type of client infrastructure.
+
+- Compared to those variants of header pinning that commit to a set of trusted
+  CAs, once a Sovereign Key has been created, the holder does not need to
+  trust /any/ CAs in the future if she does not wish to.
+
+- Compared to headers that commit to a particular cross-signing key, the
+  Sovereign Key design has a coherent revocation mechanism.
+
+Put another way, the Sovereign Key design extends the header-based approach
+to resolve a number of problems and limitations.
+
+A.2. Compared to DANE DNSSEC
+
+Sovereign Keys are compatible with, and improve the security of, the use of
+DANE DNSSEC to publish signed keys for domains.
+
+Although when compared to PKIX, DANE DNSSEC reduces the attack surface for any
+given domain, it remains the case that a very large number of parties can
+attack various domains.  For instance, google.ae could be attacked by the
+United Arab Emirates' ccTLD registry or by anyone who compromised it; bit.ly
+could be attacked by Libya's ccTLD registry of by anyone who compromised it;
+ICANN's new gTLD policy
+(https://secure.wikimedia.org/wikipedia/en/wiki/Generic_top-level_domain#June_20.2C_2011_vote_on_expansion_of_gTLDs)
+will introduce hundreds of new top level registries, any of which would become
+a point of attack for sites below it.
+
+Compared to DANE DNSSEC on its own, the Sovereign Key design removes these
+several hundred (or several thousand) points of attack against connection
+security.
+
+It also has the advantage of providing an optional mechanism for circumventing
+attacks when they occur.
+
+A.3. Compared to Perspectives/Convergence
+
+Perspectives and Convergence are capable of defending against a significant
+fraction that are possible against PKIX.  But these designs suffer from
+several disadvantages:
+
+ - They raise false-positive alarms when a subset of a domain's servers switch
+   to an alternative certificate (we have observed this situation when major
+   financial domains have experimentally deployed alternative certificates
+   signed by alternative CAs).
+
+ - Generalising from the above problem, Perspectives and Convergence rely on
+   parties other than the domain holder to characterise what state the
+   domain's operational deployment /should/ be in 
+   (http://www.thesecuritypractice.com/the_security_practice/2010/04/perspectives-on-perspectives.html)
+   
+ - These designs produce false-negatives when attacks are visible from all
+   network endpoints (this can be the case, for instance, attacks via DNS
+   registrars, authoritative DNS servers, or BGP).
+
+A.4. Compared to requiring CAs to publish lists of the certificates they have
+signed for a brief period before clients will trust the certificates
+
+In a sense, the Sovereign Key design is an extension of this concept:
+CA-signed certificates are published to the timeline servers. 
+
+- The Sovereign Key design has a scalable, fairly worked-out mechanism for
+  distributing the large volume of key and certificate material that appears
+  per unit time.
+
+- The Sovereign Key design provides stronger protection for small and medium
+  sized domains, that may not have the resources to continually monitor and
+  understand what certificates are being issued for their names.
