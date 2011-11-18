@@ -1,5 +1,7 @@
 Sovereign Key Cryptography for Internet Domains
 
+Peter Eckersley (pde@eff.org) 
+
 This document describes a method for implementing persistent, secure
 associations between Internet domain names and public keys.  The method
 bootstraps from and reinforces existing PKI techniques, such as trusted CA
@@ -270,9 +272,9 @@ have plenty of room for a mirror server for the foreseeable future.
 
 Mirrors are identified by an IP address, a port number, and a public key.
 
-Timeline servers must respond to mirror queries of the form "send me all of your
-timeline entries since Serial Number S".  Appended to that response should be a
-Timeline Freshness Message (TFM):
+Timeline servers must respond to mirror queries of the form "send me all of
+your timeline entries since Serial Number S".  Appended to that response
+should be a Timeline Freshness Message (TFM):
 
 Timestamp
 Highest Serial Number to Date
@@ -548,8 +550,8 @@ Nonetheless, a governance mechanism may be required to:
 
 - monitor timeline servers' availability and their ability to push updates to
   mirrors satisfactorily.  If a timeline server is close to becoming derelict
-  (per Section 4.b), notify client implementors so that they can release
-  updates disabling it.
+  (per Section 4.b), notify client implementors so that they can consider
+  removing the timeline server from their list.
 
 - maintaining a master list of all of the timeline servers that have ever been
   trusted by deployed implementations of the protocol, for the renegation
@@ -564,6 +566,16 @@ Nonetheless, a governance mechanism may be required to:
 
 A number of operational and implementation issues are presently
 discussed in separate documents in the issues/ directory.
+
+9. Acknowledgements
+
+Many people have offered valuable advice, commentary and suggestions on this
+design.  These include most especially Dan Auerbach, John Adams, Jesse Burns,
+Roger Dingledine, Brad Hill, Jeff Hodges, Dan Kaminsky, Adam Langley, Ben
+Laurie, Bob Lord, Tom Lowenthal, Chris Palmer, Robert Ransom, Brian Smith,
+Seth Schoen, Andy Steingruebl, Aaron Swartz, Brad Templeton, and Jered
+Wierzbicki.  In most cases their advice was offered in their individual
+capacities, and does not indicate any endorsement of this design.
 
 APPENDIX A: FEATURE COMPARISON TO OTHER PROPOSALS FOR MITIGATING ATTACKS ON
 TLS VIA CAs
