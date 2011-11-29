@@ -1,6 +1,6 @@
 Sovereign Key Cryptography for Internet Domains
 
-Peter Eckersley (pde@eff.org) 
+Peter Eckersley (pde@eff.org)
 
 This document describes a method for implementing persistent, secure
 associations between Internet domain names and public keys.  The method
@@ -226,7 +226,7 @@ incorporate-by-reference a revocation of the old Sovereign Key.
    Sovereign Key Signature          }
    Timeline Signature
 
-For DOS-prevention purposes, timeline servers must not accept more than a
+For DOS-prevention purposes, timeline servers MUST NOT accept more than a
 certain number of revocations or protocol alterations for a Sovereign Key per
 unit time.  The values of these parameters are to be determined (eg 5 protocol
 alterations per month, or start with a budget of 5 allowed alterations, and
