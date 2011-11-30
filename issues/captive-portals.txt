@@ -1,0 +1,17 @@
+Adam Langley pointed out a serious problem with captive portals, which is that
+a successful SK lookup would be needed before loading the (often HTTPS)
+authentication page that they send hijacked users to.  
+
+Two possible solutions to this problem:
+
+1. Enumerate and whitelist the set of captive portal domains.  We could do
+   this by instrumenting a widely deployed browser to spot these domains.
+
+2. Try to detect the characteristic behaviour of captive portals, and if one
+   is present, temporarily whitelist the HTTPS domain that the user is 
+   redirected to when they send an http request to to hijack-me.com, but 
+   only if they haven't cached an SK for that domain (if they have cached 
+   one, they should expect a cross-signature from it).
+
+   This could be combined with UI chrome to indicate "you are being hijacked,
+   your browser is in a low security state".
