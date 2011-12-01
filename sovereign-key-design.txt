@@ -320,7 +320,7 @@ mirror is not obliged to repeat synchronisation with that peer).
 
 Renegation tracking involves sending a list of the timelines that this
 client/mirror believes to have reneged; the peer replies with a list of
-addition timelines that it believes to have reneged, along with the evidence
+additional timelines that it believes to have reneged, along with the evidence
 that renegation occurred, and a list of requests for evidence.  The initiating
 client/mirror then replies with evidence of renegation for the renegations the
 peer did not know about.  At the end of this process, both participants should
@@ -361,7 +361,7 @@ T3 = 1 week      # Records older than an week are bad news, though we will
 T4 = 2 weeks     # Once a few timelines reach this age, we fail open
 
 MAX_DERELICT_TIMELINES=2    # Timelines are derelict if nobody is seeing updates
-                          # from them.  We will tolerate this number of them
+                            # from them.  We will tolerate this number of them
 
 N_RETRIES=5      # Number of mirrors to try if we aren't getting fresh enough
                  # responses
