@@ -1,0 +1,33 @@
+CLIENT -> MIRROR
+
+Give me the history of name X [since time T]
+(Mirror responds with history)
+
+MIRROR -> TIMELINE
+
+Give me all your entries since serial number N
+(data dump)
+
+MIRROR -> MIRROR?
+
+BitTorrent the state of the timelines (for bootstrapping)
+
+TIMELINE -> TIMELINE
+
+Give me all your entries since serial number N
+(Response is a series of dumped snapshots + TFMs, ie not DOSable)
+
+TLS SERVER -> TIMELINE
+
+Register this Sovereign Key (Timeline entry T)
+Update SKed protocols
+Renew this SK
+Include a copy of this entry from another timeline
+Revoke this SK
+Reissue this SK
+
+* -> *
+
+Here is my reneged list
+Here are my additional known renegations; show me evidence for [list of reneged timelines]
+Here is the evidence you asked for

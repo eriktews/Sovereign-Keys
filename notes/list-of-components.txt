@@ -1,0 +1,56 @@
+Everywhere
+
+ - Serialise timeline entries and other data structures in a sensible way for
+   transport
+
+ - Generate and check the ECC signatures that we use in the protocol
+   
+   - (For deployment: harden against side channel attacks!!!!!!)
+
+ - Implement good local storage for the data structures (DB?  Efficient
+   compression eventually?)
+
+TLS Serverside
+
+ sk setup -- make a new sk, and wrangle all your server code to work with it
+             automagically
+
+   - find your X.509 cert + key for you
+   - make an SK from that, put it in a .sk file
+   - probe all your servers, and forcibly insert the SK cross-signature
+     - make SK cross sigs where required
+   - forcibly make at least 3 backups of your SK
+   - push the SK to the timelines
+   - install tor and publish hidden services for your TLS services
+     this will be managed by skd, the sovereign key daemon
+ 
+ sk revoke -- oh no, revoke me
+
+ sk reissue -- reissue someone else's revoked SK if they listed you as
+               inheritor
+ 
+ sk renew (actually this should normally be called by the sk daemon)
+
+Timeline / Mirror Code
+
+  - new SK 
+    - check your own timeline for contradictory entries
+    - check the evidence
+      - usually X.509 evidence
+        - check OCSP
+        - check CRL?
+        - (eventually check history of HSTS deployment via SSL Observatory)
+      - (not yet) DANE DNSSEC evidence
+    - check other timelines for contradictory registrations
+  - revocation
+    - check signature
+  - update request from mirror or other timeline
+    - find a recent TFM'd response
+    - or make one
+    - send it
+
+Client
+
+  - hook cert acceptance code in the browser
+  - check for SK cross sigs
+  - implement the mirror querying algorithm
