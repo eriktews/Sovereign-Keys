@@ -15,3 +15,10 @@ Two possible solutions to this problem:
 
    This could be combined with UI chrome to indicate "you are being hijacked,
    your browser is in a low security state".
+
+1 looks quite promissing, with the additional caveat that any time one of the
+captive portal domains creates a sovereign key, you probably want to remove it
+from the whitelist.  That would ensure that this measure did not reduce the
+security benefits of SKs for any domains that use them.  Aspects of 2 may
+still be advisable just in terms of providing a good UI for helping users let
+themselves be hijacked in the first place...
