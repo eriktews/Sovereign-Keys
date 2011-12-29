@@ -1,0 +1,9 @@
+Attack: a country blocks requests to all mirrors except a subset that falsely
+        omits certain sovereign key entries after a time T.
+
+Defense: with small probability, make an async copy of your mirror query
+         through Tor.  This way, clients will notice these attacks and cease
+         trusting those mirrors.
+
+Question: how bad would performance become if all mirror queries had
+to be torified?
