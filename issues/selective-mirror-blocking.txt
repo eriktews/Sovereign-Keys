@@ -7,3 +7,27 @@ Defense: with small probability, make an async copy of your mirror query
 
 Question: how bad would performance become if all mirror queries had
 to be torified?
+
+An alternative defense proposed by Erik Tews is to add a hash tree to the
+timeline->mirror->client data path (it's added to the TFM, but maybe you want
+two kinds of TFMs, small without hashtree and large with it).
+
+The hash tree is computed over a timeline sorted in name order
+([org,google,*],[org,google,mail]).  The blocksize should be one entry.
+In order to check the hash tree we need all the entries for the name we're
+querying, plus "one on either side".  Actually we don't need real entries on
+either side: the algorithm can use some standard "begin [org,google,*]", "end
+[org,google,*]" tokens for computing the hash tree, which saves us from
+sending irrelevant entries over the wire.
+
+The client->mirror query includes an additional request for which Timeline's
+hash tree the client would like to see.  The mirror then sends an ordinary TFM
+for all the Timelines except the one the client specified, for which it sends
+the larger TFM with an embedded hash tree.  In order to prevent a collusion
+attack clients need to be tenacious about their choice of a Timeline to query
+next!
+
+The additional size of the larger reponse is hash size x log_2 (number SK
+entries.  This is 600-700 bytes for a deployment on the scale of current TLS;
+800-900 bytes for all existing domains using SKs with a lot of updates.
+BUT it will suck when SHA1 dies.
