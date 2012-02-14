@@ -1,0 +1,15 @@
+Problem: If a CA is compromised and the attacker issues certificates, that are later used for man-in-the-middle attacks against SSL/TLS on a small scale, it could take a while, until this compromise is noticed and the CA is revoked/shut down/recovered/off business. Speeding up the detection of such a compromise would be great.
+
+The solution: Included the server certificate, that was retrieved by a client in the request.
+
+Details: A client should include the server certificate it receives from a SSL/TLS server in a request to a mirror server. If these certificates are stored, then it would be much easier to detect such certificates.
+
+Performance considerations: This adds an additional certificate to the clients request to the mirror server. Also, the mirror server must provide additional resources to store and process the certificates send in from the clients. Also, the client can only send the SK request after he has received the certificate from the server, not when he starts the connection to the server. This makes a SK request much slower, because it starts at a later time.
+
+Privacy considerations: This would also expose the structure of intranets a client is operating in.
+
+Additional questions: Because such certificates would be correctly signed by a CA, it is unclear how they can be automatically distinguished from valid CAs. A server operator only signs it's certificate with his SK, but does not register the certificate itself at the timeline server. So only a signature made for a certificate can be verified, but the absence of a signature cannot be testified with the help of a timeline server or mirror.
+
+Alternative options: A client could just submit certificates for which the SK registration failed. Currently, it is unclear, if this is easier to filter/block. For example, if an ISP decides to MITM all facebook traffic, he would decide to block SK completely. If he allows the first query, the client would not allow the user to access facebook, and see a big security warning.
+
+Conclusion: It is unclear, if this is a good idea.
