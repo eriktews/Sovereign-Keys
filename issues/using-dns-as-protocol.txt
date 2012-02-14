@@ -1,0 +1,11 @@
+Idea: Use DNS instead of a custom protocol for SK queries.
+
+The problem: Building mirrors for the timeline servers requires additional resources and a custom protocol must be designed to communicate with these mirrors. Also, the client must choose a mirror somehow, and choosing a mirror on the other side of the world could result in poor performance. Also explained in "captive-portals.txt", the mirror might be not available, when the user needs to sign up on a https webpage first, before he is allowed to use the internet.
+
+The solution: As it is done today with real time DNS blocklists to fight against SPAM, one could communicate over DNS to query timeline servers. Assuming that answers, as described in "signing-sk-data-on-master.txt" are signed by the timeline server, they could be made available over DNS. DNS servers operated by the clients ISP will cache the most frequent requests. Also, when the user is on a captive portal, DNS is usually available, before the user logs in.
+
+Privacy implications: The current design of SK assumes, that a client communicates with a mirror using an encrypted link. Using DNS usually requires the client to communicate in clear with the DNS server. However, there is a reason to believe the the privacy loss here is minimal. Most users will request the IP address of the server they are going to communicate to using SSL/TLS from their ISPs DNS server anyway. So the ISP here or an eavesdropper will not gain much additional information here.
+
+Availability: Instead of a mirror server, which maintains a copy of all timeline entries, a DNS server will not cache any entries proactively. It is still necessary to operate multiple/redundant DNS servers that maintain a copy of the timeline, and export this data to DNS.
+
+Technical problems: The DNS answers here might be much bigger that usual DNS entries, so one should check first, if such large DNS requests cause problems with popular implementations of DNS servers or DNS resolvers.
