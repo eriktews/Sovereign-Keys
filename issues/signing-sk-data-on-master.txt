@@ -1,0 +1,24 @@
+Idea: All timeline entries should be signed by the timeline servers at regular intervals to make slave servers less powerful and less vulnerable.
+
+The Problem: As explained in "selective-mirror-blocking.txt", it would be desirable if a client could check freshness and correctness of an answer received from a mirror server. At the current design, there are two ways how mirror servers could cheat:
+
+ * A mirror can simply send out a wrong answer, which adds, modifies or suppresses some of the entries for a given name. This can be checked by querying a second mirror with the same request, and comparing the answers. If a mirror has cheated here, the client immediately has proof, because the answer from the mirror was signed by the mirror using the mirrors private key.
+ * A mirror can be intentionally out-of-date, and suppress entries that have been recently added to the timeline. This kind of cheating is harder to proof, because there might be always some delay when updating a mirror server.
+
+The solution: Every timeline server signs a data structure like:
+
+ * As of time and serial T, there are the following entries for name N, with a higher serial number than SN. *
+
+For all names it has SK registered. If there are multiple entries for a name, the timeline server might decide to sign multiple data structures, so that some of these structures only contain the most recent entries.
+
+and:
+
+ * As of time and serial T, there are no entries between NA and NB, in alphabetical order. *
+
+For all names it has SK registered, so that even negative answers are possible.
+
+These signatures are then stored on mirror servers. When a client querys the mirror server for a name that is registered, the mirror sends out all entries (or only the recent ones if the client has cached some entries) and adds the signature from the timeline server. The client can then verify that the answer is fresh (because the timestamp in the signature is fresh) and correct (because it has been signed by the timeline server). If the client querys for a none existing name, the mirror can provide proof that this name is currently not registered.
+
+Performance considerations: Performance is critical here. Assuming that really 2 * 10^8 domain names are stored in a timeline, and signatures are refreshed every hour, and a signature is about 32 bytes, then 6.1 GB of signatures need to be transferred to every mirror per hour, even when nothing is added to the timeline. However, there is a solution:
+
+So far, we assumed that a signature is created for every data structure. Using an algorithm like ECDSA, a signature only needs 32 bytes of space. An alternative would be to build a hash tree, as suggested in "selective-mirror-blocking.txt", over all data structures, and sign only the root of this hash tree. If a hash function with a 256 bit output is used, about 28 * 32 = 896 bytes need to be added to every response to a client from a mirror so that the client can verify the integrity of the data in the tree, and then verify the signature on the root of the tree. However, only 32 bytes need to be transferred to every mirror per hour. There are also tradeoffs possible. For example, one could sign 2^14 nodes in the tree. Then only 448 additional bytes need to be included in every response to the client, and 0.5 MB of signatures need to be transferred to every mirror per hour.
