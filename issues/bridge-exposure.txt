@@ -1,0 +1,16 @@
+The SK spec indicates that Tor hidden services could be used as a fallback
+mechanism for users who are affected by MITM or connection blocking attacks.
+
+On particularly hostile networks, it is presumed that these users would
+access the Tor network via Tor bridges or similar tunneling mechanisms.
+Unfortunately, this probably gives network attackers a way of detecting the
+bridges.
+
+For example, if a network attacker is trying to censor
+yourdomain.bloghosting.com, they can observe (via SNI, for instance) that Alice
+is trying to connect to that domain.  They may then MITM or block her
+connection, in which case Alice's SK client will fall back to a Tor bridge to
+connect to yourdomain.bloghoster.com's hidden service.  But at that moment,
+the attacker knows Alice's client will be doing this, and they can interdict
+the connection to the bridge, and learn the IP of a bridge relay to boot.
+
