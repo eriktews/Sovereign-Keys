@@ -27,7 +27,7 @@ the larger TFM with an embedded hash tree.  In order to prevent a collusion
 attack clients need to be tenacious about their choice of a Timeline to query
 next!
 
-The additional size of the larger repose is hash size x log_2 (number SK
+The additional size of the larger response is hash size x log_2 (number SK
 entries.  This is 600-700 bytes for a deployment on the scale of current TLS;
 800-900 bytes for all existing domains using SKs with a lot of updates.
 BUT it will suck when SHA1 dies.
