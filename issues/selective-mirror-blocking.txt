@@ -27,7 +27,19 @@ the larger TFM with an embedded hash tree.  In order to prevent a collusion
 attack clients need to be tenacious about their choice of a Timeline to query
 next!
 
-The additional size of the larger reponse is hash size x log_2 (number SK
+The additional size of the larger repose is hash size x log_2 (number SK
 entries.  This is 600-700 bytes for a deployment on the scale of current TLS;
 800-900 bytes for all existing domains using SKs with a lot of updates.
 BUT it will suck when SHA1 dies.
+
+Various tradeoffs how parameters for the hash tree could be chosen can be
+found int his Google docs spreadsheet:
+
+  * https://docs.google.com/spreadsheet/ccc?key=0Ak_UqCvQqMRAdGVMTU9KRVZLQUFKUENyZzdfYUkzUEE
+
+In a nutshell, using a 256 bit hash function and an 256 bit ECC signature
+scheme, allows you to generate 65536 signatures in the hash tree, which should
+take about 50 seconds on a 3.1 GHz i5 core, with a total size of 4.19 MB. And
+you can embed everything you need to verify the request in 492 bytes, which
+need to be included in the response to the client.
+
