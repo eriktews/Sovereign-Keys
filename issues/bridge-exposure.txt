@@ -14,3 +14,21 @@ connect to yourdomain.bloghoster.com's hidden service.  But at that moment,
 the attacker knows Alice's client will be doing this, and they can interdict
 the connection to the bridge, and learn the IP of a bridge relay to boot.
 
+Available mitigation strategies:
+
+  - Allow domain holders to specify that on certain networks, the first
+    connection should not be vanilla TLS.  For instance, "if you are in Iran,
+    start with my .onion address".  This might be a nice/useful feature at
+    some point, but it doesn't completely solve the attack: the attacker can
+    target any connection that it knows will fall back to circumvention, not
+    just those that are playing cat-and-mouse.
+
+  - Use circumvention techniques that are at least somewhat tolerant to giving
+    the attacker an oracle for circumvention connections.  Telex may or may
+    nott be such a technique.
+
+  - Use circumvention techniques in an all-or-nothing way.  If you're using
+    telex, or obfsproxy, or some other thing, all TLS traffic needs to go
+    through it.  Hopefully this does not imply the same kind of latency hit as
+    tor!
+
