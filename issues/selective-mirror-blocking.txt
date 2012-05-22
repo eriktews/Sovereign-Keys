@@ -43,12 +43,14 @@ take about 50 seconds on a 3.1 GHz i5 core, with a total size of 4.19 MB. And
 you can embed everything you need to verify the request in 492 bytes, which
 need to be included in the response to the client.
 
-A hash tree over the whole database can be computed in O(n) time and
-O(log_2(n)) memory by the master and the receiver. This only requires a linear
-read and write over the whole database. Hash functions are generally faster
-than hard disk speeds on most systems. Assuming that it takes t_r time to read
-linearly through the whole database and t_w time, to write the whole database,
-the complete process should be done in less than t_r + t_w time.
+Assume that there are n database entries and m hashes to the signature. One
+might choose m = log_2(n)/2.  A hash tree over the whole database can be
+computed in O(n) time and O(m*2^m) memory by the master and the receiver. This
+only requires a linear read and write over the whole database. Hash functions
+are generally faster than hard disk speeds on most systems. Assuming that it
+takes t_r time to read linearly through the whole database and t_w time, to
+write the whole database, the complete process should be done in less than t_r
++ t_w time.
 
 The performance when it comes to answering requests from clients is a bit more
 difficult to answer. First, I would assume that the for example 65536
