@@ -35,7 +35,7 @@ client observes a Sovereign Key for a domain and protocol, the client MUST
 also refuse to communicate over insecure variants of the registered protocols
 (HTTP, SMTP, etc).
 
-0.b. Circumvention of attacks
+0.b. Automatic circumvention of attacks
 
 User interface research has shown that it insufficient to warn users about the
 presence of a server impersonation or man-in-the-middle attack.  A large
@@ -47,11 +47,10 @@ With Sovereign Keys, the certificate warning interface MAY be removed, and
 replaced with code that automatically routes around server impersonation,
 man-in-the-middle, and connection blocking attacks.
 
-The recommended method for attack circumvention is to compute a SHA1 sum of
-the Sovereign Key, producing a Tor .onion "hidden service" address, and to
-connect to that.  Other methods, such as employing proxies or VPNs to
-circumvent the attack, are also possible.
-
+The Sovereign Key protocol allows server operators to specify their preferred
+routes for attack circumvention, which may include routing to specific IPs and
+ports; routing via Tor; routing via a Tor hidden service; I2P or other
+future/experimental protocols.
 
 1. Timeline Servers
 
@@ -105,7 +104,7 @@ Sovereign Key       char[256] : name               50
                     bool      : wildcard           1
                     char[]    : key type           0.5
                     char[]    : sovereign_pubkey   224-256 (assuming ECC)
-                    char[]    : protocols          10
+                    char[]    : protocols          200-300
                     uint64_t  : expires on         25
 --------------------------------------------------------------------------------
 In case of          char[][]  : inheriting name(s) 50 
@@ -165,7 +164,19 @@ denoting the services that must be cross-signed by the Sovereign Key on this
 domain.  A service may optionally have a port number designating a
 non-standard port for that service (eg, "https:8080").  The protocols field
 may also contain the value "all", in which case clients should always expect
-services on this domain to be authenticated with the Sovereign Key.
+services on this domain to be authenticated with the Sovereign Key.  
+
+Each string in the protocols list may optionally be suffixed by a
+semicolon-delimited list of methods for alternative routing to that service.
+For instance, if the protocols field were
+["https:8080;123.45.67.89:8080;ttbmov2dezfs2fln.onion", "smpts",
+"imaps;711E9E5711A6E28E2A27DE23B7C70C91D39908D0.exit"], that would specify
+that a connection to https on port 8080 may alternatively be routed to the IP
+address 123.45.67.89, or to the specified .onion address, in decreasing order
+of preference; that a connection to the domain via IMAPS could be routed via a
+particular tor exit node at MIT (similar to exit enclaving, but secure against
+false DNS responses); however no alternative route to this domain's SMTPS
+server is available.
 
 The timeline's signature is computed over and authenticates all of the
 fields.  Such signatures may be performed offline.
