@@ -1,0 +1,1225 @@
+Sovereign Key Draft Specification
+Jered Wierzbicki
+
+0. Overview.
+
+Sovereign Keys (SKs) are public keys persistently bound to domain
+names in a distributed log. This log is read mirrored so TLS clients
+can validate keys when establishing connections. For more background
+about the SK system see the design doc [1].
+
+1.1. The distributed log.
+
+The SK distributed log records the history of name to SK bindings.
+To ease implementation and deployment, server nodes (see section 2)
+keep their local log segments consistent, but the log is only weakly
+globally ordered by synchronized clock measurements. This is simpler
+than a strong global ordering like Paxos [2]. Log entries from
+different segments are combined at lookup time (see section 1.4).
+
+1.2. Log entries.
+
+1.2.1. Canonical form.
+
+Canonical form MUST be used to sign and check entry signatures and
+transport entries in bulk (suitably compressed). Canonical form is a
+7-bit ASCII plaintext representation. Its point is to be human
+readable, obvious, signable, extensible, and permanent; extensions to
+it SHOULD prefer string constants to magic numbers.
+
+<type> ": " <version> '\n'
+<field1> ": " <value> '\n'
+...
+<fieldN> ": " <value> '\n'
+'\n'
+
+<type> is a string constant giving an entry's type. <version> is a
+decimal integer specifying the version of the entry type, and MUST be
+incremented whenever fields are added, removed, or change meaning.
+All previous versions of all entry types MUST be supported. <type> and
+<version> together imply a set of fields which MUST follow.
+
+<field>: <value> pairs MUST be sorted by field name in byte order.
+Each <field> is a literal string constant. Each field expects a value
+type. Binary values such as signatures and DERs MUST be URL safe
+base64-encoded strings; integer values MUST be decimals with no
+leading zeros; boolean values MUST be '1' (true) or '0' (false); and
+timestamps MUST be a POSIX timestamp. Fields and values MUST NOT
+contain ": " or '\n'; for simplicity, no provision is made for
+escaping these sequences. If really needed, base64 encode the field.
+
+Canonical form entries with invalid character encodings, missing or
+unrecognized fields, or invalid values MUST NOT be processed.
+
+1.2.2. Signing entries and checking signatures.
+
+To sign an entry, SK services MUST convert it to canonical form with
+all ignored fields, including the intended signature field, present
+and set to the literal string "N/A", then replace the value for the
+intended signature field.
+
+Similarly, when checking an entry signature, SK services MUST first
+convert the entry to canonical form and replace ignored fields,
+including the checked signature field, with "N/A".
+
+1.2.3. Common fields.
+
+Timelines MUST stamp all log entries with an incrementing local
+timeline serial number (SN) and a monotonically non-decreasing UTC
+timestamp,
+
+<Stamp fields> :=
+  SN: <integer, incrementing local serial number>
+  Timestamp: <monotonically non-decreasing timestamp>
+
+The identity of a timeline is implied by its Signature which is only
+valid for its key. "Signature" by itself as a field name always refers
+to a timeline signature. "SK-Signature" means a signature by the
+sovereign key holder over the values which they control in an entry.
+
+1.2.4. Entry types.
+
+Timelines MUST support the following log entry types.
+
+1.2.4.1. Bind.
+
+Bind entries establish an SK for a domain name. Some of the Bind
+fields are repeated in other entries.
+
+<Bind fields> :=
+  Name: <string, domain name>
+  Includes-Subdomains: <boolean, 1 or 0>
+  Key: <binary DER, base64 encoded; size implies length>
+  Key-Type: <string, RSA or ECC>
+  Services: <string, comma separated services (see 1.3.1)>
+  Rebinder-Names: <string, comma separated list of authorized
+                   Rebinders (see 1.3.2)>
+  CA-Cert-Chain: <DER, base64 encoded>
+  SK-Signature: <binary, base64 encoded>
+
+So a bind entry looks like
+
+  Bind: 1
+  <Stamp fields>
+  <Bind fields>
+  Signature: <binary, base64 encoded>
+
+SK-Signature MUST BE computed by the registrant over <Bind fields>.
+
+1.2.4.2. Unbind.
+
+Unbind entries invalidate an SK.
+
+  Unbind: 1
+  <Stamp fields>
+  Name: <string, domain name>
+  Last-Secure-Timestamp: <timestamp when SK was last secure, or
+                          0 if don't know>
+  SK-Signature: <binary, base64 encoded>
+  Signature: <binary, base64 encoded>
+
+SK-Signature MUST be a signature with Name's SK over Name and
+Last-Secure-Timestamp.
+
+1.2.4.3. Rebind.
+
+Rebind entries re-establish the binding between an SK and a domain
+name after an old SK has been unbound from that name.
+
+  Rebind: 1
+  <Stamp fields>
+  <Bind fields>
+  Rebinder-Name: <string, domain name>
+  Rebinder-Signature: <binary, base64 encoded>
+  Signature: <binary, base64 encoded>
+
+Rebinder-Signature MUST be a signature with Rebinder-Name's SK over
+<Bind fields> and Rebinder-Name.
+
+1.2.4.4. Change-Services.
+
+Change-Services entries store an update to the "Services" field for an
+SK record.
+
+  Change-Services: 1
+  <Stamp fields>
+  Name: <string, domain name>
+  Services: <string, comma separated services (see 1.3.1)>
+  SK-Signature: <binary, base64 encoded>
+  Signature: <binary, base64 encoded>
+
+SK-Signature MUST be a signature with Name's SK over Name and
+Services.
+
+1.2.4.5. Add-Root-CA.
+
+Add-Root-CA entries record that a timeline trusts a new root CA as of
+some time.
+
+  <Stamp fields>
+  CA-Cert: <binary, DER X.509 certificate, base64 encoded>
+  Signature: <binary, base64 encoded>
+
+1.2.4.6. Remove-Root-CA.
+
+Remove-Root-CA entries record that a timeline no longer trusts a root
+CA as of some time.
+
+  <Stamp fields>
+  CA-Cert-Hash: <SHA256 hash of untrusted cert, base64 encoded>
+  Signature: <binary, base64 encoded>
+
+1.3. Special field encodings.
+
+1.3.1. Services field.
+
+The Services field contains a comma-delimited list of service names
+provided by the domain which MUST use its SK, e.g.
+
+Services: https,smtps,imaps
+
+The special value "all" means the SK should be used for all services.
+
+Each service name MAY be suffixed with a colon and a non-default port
+number, e.g. https:8080. Each service name MAY also contain a
+semicolon delimited list of alternate routes for the service. The
+syntax of alternate routes is undefined, except that they MUST NOT
+contain a semicolon.
+
+1.3.2. Rebinder-Names field.
+
+The Rebinder-Names field contains a comma-separated list of domain
+names which MAY rebind a new SK to a domain name which has revoked its
+old SK binding. The string "none" means no domains are so authorized.
+
+1.4. Combining entries from multiple log segments.
+
+Clients combine log entries for a domain name from several log
+segments at lookup time. Let X and Y be different log entries, and let
+E.t be an entry timestamp, E.sn be an entry serial number, and E.tid
+be the id of its timeline server. Then
+
+  X "precedes" Y = X.t < Y.t || (X.t == Y.t &&
+      (X.tid < Y.tid || (X.tid == Y.tid && X.sn < Y.sn))).
+
+In a set of log entries, the "oldest" is the minimum under "precedes"
+and the "newest" is the maximum under "precedes".
+
+The following algorithm MUST be used to combine log entries to produce
+a domain name's current SK record R:
+
+a) Sort the entries from oldest to newest.
+b) If there is an Unbind entry:
+  1. Find the newest Unbind and check its signatures.
+  2. If signatures check, discard the Unbind and all entries that
+     precede it, else see section 5.
+  3. Let R be the oldest Rebind among the remaining entries.
+c) If there is no Unbind, let R be the oldest Bind.
+d) If R is defined, find the newest Change Services entry after R;
+   if any exists, check its signatures and update R's Services.
+
+1.5. Wire protocol encoding.
+
+SK mirrors and clients use a binary encoding to communicate. Messages
+begin with this header:
+
+#Bytes Field   Notes
+1      Type    Specifies the message type.
+1      Version Specifies the version of this message type.
+
+After this is a list of values for the message. In vesion 0 message
+types, values are not tagged; they are just concatenated in a defined
+order. Extensions to this encoding SHOULD fill deleted fields with 0
+and append new fields to the end of each message type. Non-compatible
+changes to fields or encodings MUST introduce a new version number.
+
+1.5.1. Value encodings.
+
+Timestamps are encoded as unsigned 32-bit integers in little-endian
+byte order. This will work until 7 February 2106. Future encoding
+versions may revisit this choice.
+
+Value encodings make use of varints, a variable length little-endian
+integer encoding. The lower order 7 bits in each byte of a varint
+encode 7 bits of a value. The high order bit of each byte is 0 if no
+more bytes follow, and 1 if more higher order bytes follow. 
+
+Integer values are encoded as varints. Binary values are encoded as a
+varint length followed by length raw bytes.
+
+Boolean values are the byte 1 for true or 0 for false.
+
+Strings are NUL terminated.
+
+1.5.2. Message types.
+
+1.5.2.1. Timeline Freshness Messages (TFMs).
+
+TFMs have type 0. Version 0 TFMs have this field order:
+
+Field                   Encoding
+TID                     varint
+Timestamp               timestamp
+Max-Published-SN        varint
+Max-Published-Timestamp varint
+Max-SN                  varint
+Max-Timestamp           varint
+Signature               binary
+
+1.5.2.2. Bind messages.
+
+Bind messages have type 1. Version 0 Bind messages have this field
+order:
+
+Field                   Encoding
+TID                     varint
+SN                      varint
+Timestamp               timestamp
+Name                    string
+Includes-Subdomains     boolean
+Key                     binary
+Key-Type                byte: 0 for RSA, 1 for ECC
+Services                string
+Rebinder-Names          string
+CA-Cert-Chain           binary
+SK-Signature            binary
+Signature               binary
+
+1.5.2.3. Unbind messages.
+
+Unbind messages have type 2. Version 0 Unbind messages have this field
+order:
+
+Field                   Encoding
+TID                     varint
+SN                      varint
+Timestamp               timestamp
+Name                    string
+Last-Secure-Timestamp   timestamp
+SK-Signature            binary
+Signature               binary
+
+1.5.5. Rebind messages.
+
+Rebind messages have type 3. Version 0 Rebind entries have this field
+order:
+
+Field                   Encoding
+TID                     varint
+SN                      varint
+Timestamp               timestamp
+Name                    string
+Includes-Subdomains     boolean
+Key                     binary
+Key-Type                byte: 0 for RSA, 1 for ECC
+Services                string
+Rebinder-Names          string
+CA-Cert-Chain           binary
+SK-Signature            binary
+Signature               binary
+Rebinder-Name           string
+Rebinder-Signature      binary
+Signature               binary
+
+1.5.6. Change-Services messages.
+
+Change-Services messages have type 4. Version 0 Change-Services
+messages have this field order:
+
+Field                   Encoding
+TID                     varint
+SN                      varint
+Timestamp               timestamp
+Name                    string
+Services                string
+SK-Signature            binary
+Signature               binary
+
+1.5.7. NXDOMAIN messages.
+
+NXDOMAIN messages have type 5 and, unlike other message types, MUST
+contain a Name field so that the mirror signs a statement about which
+domain it is that does not exist.
+
+Field                   Encoding
+Name                    string
+
+2. Timeline servers.
+
+Timeline servers or "timelines" implement a distributed read- and
+append-only log. Timelines write log entries to a local segment and
+publish it for efficient mirroring.
+
+Each timeline must have a distinct public key. Timelines have an
+address,
+
+  TADDR = (domain name, port, public key)
+
+and are identified by a globally unique integer timeline id (TID).
+TIDs are assigned to TADDRs statically in the SK client library. Once
+assigned, a TID is permanent. A TID MUST NOT be re-used for a timeline
+with a different TADDR and MUST NOT have its assignment removed.
+
+Timelines provide an HTTP interface.
+
+2.1. /append requests.
+
+Timelines MUST accept /append requests via HTTP POST. This is how
+registrants write to a timeline's log segment, and also how timeline
+operators log configuration like trusted CAs.
+
+POST data should be e=<ENTRY> where <ENTRY> is the text of a log entry
+in canonical form, encoded application/x-www-form-urlencoded. A POST
+with missing or unrecognized form fields MUST be considered malformed.
+Any timeline-controlled fields submitted as part of the POSTed "e",
+such as timestamp and sequence number fields, MUST be ignored by the
+timeline server; timelines MUST NOT ascribe special meanings to entry
+fields in this context. Instead, this spec should be extended to
+include additional POST form parameters if warranted.
+
+Upon receiving an /append, timelines MUST respond as follows:
+
+a) If overloaded or rate limiting, "503 Service Unavailable".
+b) If POST data is malformed, "400 Bad Request".
+c) Either
+  1. Queue the request for later validation and respond with
+     "202 Accepted" and a token to query via /status, or
+  2. Perform validation steps immediately.
+    a. If request times out, "408 Request Timeout".
+    b. If request is invalid, "403 Forbidden".
+    c. If a fault prevents completion, "500 Internal Server Error".
+    d. If request is valid and complete, "201 Created".
+
+Note timelines MUST NOT respond "201 Created" to /append unless the
+entry is valid and committed to persistent storage, for example synced
+to disk such that it will be available after a power failure. Clients
+SHOULD assume that "201 Created" means an entry is part of the log and
+will soon be published.
+
+Because validating /append requests may involve communication with
+other Internet servers, timelines SHOULD discard such requests active
+for longer than some REQUEST_TIMEOUT and respond with "408 Request
+Timeout".
+
+2.1.1. Queueing for /append requests.
+
+Because validation steps may be expensive, it is suggested that a
+timeline SHOULD keep a queue of /append requests and limit the number
+of simultaneous requests it handles. For example, pseudocode for
+/append request queuing may look like
+
+  if (num_queued == MAX_REQUESTS) {
+    // Reject the request without any processing if too busy.
+    respond(503);
+  } else if (!check_entry(post_data)) {
+    // Do not queue invalid requests.
+    respond(400);
+  } else {
+    token = queue_request();
+    if (num_queued > MAX_ACTIVE_REQUESTS) {
+      // Defer request if it cannot be serviced immediately.
+      respond(202, token);
+    } else {
+      // Handle the request immediately.
+      handle_request();
+    }
+  }
+  // Implied that queued requests become active as others finish.
+
+2.1.2. Tokens for queued /append requests.
+
+Timelines SHOULD provide a token to check the status of a queued
+/append request in the body of a 202 response. Tokens MUST be suitable
+for appending to a URI, and SHOULD be sufficiently random that they
+cannot be trivially enumerated and will not collide soon after a
+request. For example, tokens may be an URL-safe base64 encoded 36-bit
+hash of the client IP, request time and a pseudorandom value.
+Timelines which do not implement request status MUST respond with a
+non-empty dummy value for token in the body of a 202 response.
+
+2.1.3. Validation for /append requests.
+
+Each entry implies preconditions that MUST be valid before it can be
+appended. For example, entries which are not in valid canonical form
+MUST be rejected. The following sections list other validation steps
+for each entry type.
+
+In addition, a timeline MUST keep its log segment consistent. All
+entries require checking the current state of the timeline. This MAY
+be the state as of the time when validation began, but a timeline MUST
+NOT commit entries in an inconsistent order. For example if an Unbind
+is committed for the Rebinder-Name in a Rebind while the Rebind is in
+progress, the Rebind MUST NOT commit after it.
+
+2.1.3.1. Validation for Bind entries.
+
+a) Name and Rebinder-Names are lexically correct domain names.
+b) There is no existing Bind entry for Name on this timeline.
+c) SK-Signature is a valid signature with Key.
+d) CA-Cert-Chain is from a trusted root cert.
+e) CA-Cert-Chain signatures are correct.
+f) OCSP response for end-entity cert is good.
+g) Name matches the end-entity cert in CA-Cert-Chain.
+h) Key matches the end-entity public key in CA-Cert-Chain.
+i) Name is not among Rebinder-Names.
+j) Key is distinct from the Keys for Rebinder-Names.
+
+Other things which are potentially bad, but not fatal errors:
+
+a) Rebinder-Names contains names which are not registered on this
+   timeline.
+b) Name or Rebinder-Names cannot be resolved.
+
+2.1.3.2. Validation for Unbind entries.
+
+a) Name is bound on this timeline.
+b) SK-Signature is correct.
+
+2.1.3.3. Validation for Rebind entries.
+
+a) The newest entry for Name on this timeline is an Unbind.
+b) Rebinder-Name is among the Rebinder-Names for the newest Bind
+   for Name.
+c) Rebinder-Name is bound on this timeline.
+d) Rebinder-Signature is correct.
+e) Validation steps for Bind entries.
+
+2.1.3.4. Validation for Change-Services entries.
+
+a) Name is currently bound on this timeline.
+b) SK-Signature is correct.
+
+2.1.3.5. Validation for Add-Root-CA entries.
+
+a) Root CA is not already on this timeline.
+b) Signature is a valid signature for this timeline's public key.
+
+2.1.3.6. Validation for Remove-Root-CA entries.
+
+a) Root CA is currently on this timeline.
+b) Signature is a valid signature for this timeline's public key.
+
+2.2. /status requests.
+
+Timelines MUST respond to HTTP GET requests for /status with a
+Timeline Freshness Message (TFM). A TFM response is formatted in the
+entry canonical form
+
+  HTTP/1.1 200 OK
+  Content-type: text/plain
+
+  TFM: <version>
+  Timestamp: <Current timestamp>
+  Max-Published-SN: <Highest published serial number>
+  Max-Published-Timestamp: <Timestamp for Max-SN>
+  Max-SN: <Highest serial number of any entry>
+  Max-Timestamp: <Highest timestamp of any entry>
+  Signature: <binary, base64 encoded signature>
+
+Timelines MUST recompute these responses whenever Timestamp has
+changed between /status requests.
+
+2.2.1. /status/<TOKEN> requests.
+
+Timelines MUST respond to HTTP GET requests for /status/<TOKEN> where
+<TOKEN> is a request token previously returned in a 202 response to
+/append. They MUST respond "501 Not Implemented" if request status
+tracking is not implemented.
+
+Otherwise, timelines SHOULD keep request status for at least 5 minutes
+after a request finishes, and MUST respond to /status/<TOKEN> as
+follows:
+
+a) If <TOKEN> is not being tracked, "410 Gone".
+b) Otherwise, "200 OK" with a text/plain body where the first line is
+   either "202 Accepted" if the request is still pending, or the
+   status code which would have occurred had the request been
+   processed immediately.
+
+2.3. Publication.
+
+Timelines MUST periodically publish "chunks" of their log segment to
+publicly accessible URIs such as HTTP URLs or magnet URIs. These URIs
+need not be served by the timeline. Chunks MUST be a concatenated,
+in-order list of contiguous log entries in a range of serial numbers
+and then a TFM, all in canonical form compressed with bzip2.
+
+Chunks function as an incremental backup and mirroring mechanism. They
+SHOULD be smaller and more frequent for recent history, and larger and
+more infrequent for older history. For example, a timeline MAY provide
+10 minute chunks for an hour, hourly chunks for the last several
+hours, daily chunks for the last several days, then weekly and monthly
+chunks, etc.
+
+A timeline installation MAY archive but not publish some chunks for
+internal use, for example in a tape backup system.
+
+A timeline MUST provide all previously published entries from its log
+segment as part of at least one publicly served chunk. Timeline
+operators SHOULD ensure that all chunks remain at least minimally
+available, for example by seeding them on bittorrent or periodically
+testing HTTP mirrors.
+
+2.3.1. /chunks requests.
+
+Timelines MUST respond to HTTP GET requests for /chunks with a list of
+publicly accessible URIs for chunks, a "chunk list", covering their
+entire published log segment. The chunk list SHOULD be time ordered,
+as short as possible, and SHOULD be precomputed and cached as chunks
+are published or rotated rather than when serving /chunks.
+
+The response to /chunks MUST be "200 OK" followed by a text/plain
+\n-delimited chunk list:
+
+  HTTP/1.1 200 OK
+  Content-Type: text/plain
+
+  magnet:?xt=urn:sha1:... <sn1> <sn2> <base64 sig>
+  https://chunks.example.com/a.bz2 <sn1> <sn2> <base64 sig>
+  https://chunks.example.com/b.bz2 <sn1> <sn2> <base64 sig>
+
+After each chunk URI, separated by a space, there MUST also follow the
+first SN in that chunk, the last SN in that chunk, and then a
+base64-encoded signature of the chunk with the timeline server's
+public key. Mirrors will use this to ensure integrity.
+
+2.3.2. /chunks/since/<SN> requests.
+
+Timelines MUST respond to HTTP GET requests for /chunks/since/<SN>
+with a list of chunks containing all log entries with serial
+numbers higher than SN. If SN is not a valid serial number, a timeline
+MUST respond "400 Bad Request". If no higher serial numbers have been
+published, timelines MUST respond "304 Not Modified".  Otherwise the
+response MUST be formatted as for a plain /chunks request. The chunk
+list SHOULD be time ordered and include as few extra entries as
+possible.
+
+2.3.3. /chunks/between/<SN1>/and/<SN2> requests.
+
+Timelines MUST respond to HTTP GET requests for
+
+  /chunks/between/<SN1>/and/<SN2> 
+
+with a list of chunks containing all log entries with serial numbers
+higher than SN1 and lower than SN2. If SN1 or SN2 are not valid serial
+numbers or SN1 >= SN2, a timeline MUST respond "400 Bad Request".
+Otherwise the response MUST be formatted as for a plain /chunks
+request. The chunk list SHOULD be time ordered and include as few
+extra entries as possible.
+
+3. Mirrors.
+
+Mirrors replicate log segments from timelines, answer client queries,
+and verify timeline integrity. A public mirror MUST replicate at least
+two different timelines. Timeline operators MAY operate private
+mirrors for testing, but MUST NOT publish these mirrors.
+
+Mirrors MUST mirror from the beginning of each log segment for each
+mirrored timeline; mirrors MUST NOT omit entries.
+
+A mirror MUST track the TFM corresponding to the newest chunk it is
+serving from each timeline it mirrors.
+
+3.1. Updating a mirror.
+
+A mirror MUST track state for each timeline it mirrors, which affects
+how that timeline is updated and served. The state is one of New,
+Idle, Syncing, Stuck, Defunct, or Corrupt. Mirrors MUST NOT respond to
+name queries unless they have two or more Idle or Syncing timelines.
+
+Mirror operators SHOULD monitor how much time each timeline spends in
+each state. Timelines which spend much longer Syncing than Idle should
+probably sync more frequently. Timelines which are often Stuck may
+need special handling.
+
+Chunk downloads SHOULD be prioritized in oldest first order per
+timeline, splitting download bandwidth proportionally between mirrored
+timelines. In normal operation there may be several chunks downloading
+simultaneously per timeline. But note that oldest first gives Stuck
+timelines priority, while not monopolizing bandwidth since they are
+limited to one chunk download at a time (see section 3.1.4.)
+
+3.1.1. New timelines.
+
+Initially mirrored timelines have state New. A mirror MAY bootstrap
+log segments for a timeline by offline means or by downloading URIs
+listed in its /chunks response (see section 2.3.1). A timeline becomes
+Idle after all of its chunks are initially downloaded, verified and
+merged.
+
+A mirror MUST NOT serve entries from a New timeline.
+
+3.1.2. Idle timelines.
+
+Every sync interval, 10 minutes or when reloading, e.g. on SIGHUP or
+restart, a mirror SHOULD send /chunks/since/<Max-Published-SN> to each
+of its Idle timelines where <Max-Published-SN> is the value from the
+current TFM (see section 2.3.2).
+
+If no new chunks have been published, a timeline remains Idle. If
+there are new chunks, a timeline switches into Syncing state, tracking
+its pending chunk list and desired sync range, the range of SNs in the
+chunk list. If the /chunks/since/... request times out, the timeline
+MUST be marked as Stuck with a sync range with a lower bound of the
+current TFM Max-Published-SN and no upper bound.
+
+3.1.3. Syncing timelines.
+
+A Syncing timeline has a list of chunks it MUST download, verify, and
+then merge from a /chunks request. When all chunks have been
+downloaded, verified and merged, the timeline becomes Idle. If
+something goes wrong, the timeline will instead become Stuck.
+
+If a chunk download times out, i.e. its predicted completion time is
+more than 2 minutes in the future for more than 2 minutes, the
+download MUST be cancelled and the partial chunk deleted. The download
+SHOULD be retried again after waiting 5 minutes, up to 3 times. After
+a download fails 3 times, the timeline MUST be marked Stuck.
+
+If a chunk's signature does not verify, it SHOULD be deleted, and the
+timeline MUST be marked as Stuck.
+
+Once a chunk is downloaded and verified, it MUST be merged with the
+mirror database (see section 3.1.3.1.) As oldest remaining chunks
+finish merging, the mirror's current TFM for a timeline MUST be
+updated to the newest contiguous merged TFM, the lower bound of the
+sync range MUST be updated, and the mirror MUST begin serving entries
+from those chunk(s).
+
+3.1.3.1. Merging entries.
+
+Merging involves uncompressing, decoding, verifying, consistency
+checking and writing entries. Merging SHOULD be done in a streaming
+fashion so as not to monopolize system resources. If a data error such
+as an invalid encoding or truncation is encountered during merging,
+already merged entries from a chunk must not be committed, remaining
+entries should be ignored, and the timeline MUST be marked as Stuck.
+
+If an entry's timeline signature checks but its SK signature does not,
+its timeline MUST be marked Corrupt with this entry as evidence. If
+any of the consistency properties for an entry type with respect to
+its own log segment are not satisfied (see section 2.1.3), the
+timeline MUST be marked Corrupt, and this entry and any previous
+conflicting entries are the evidence.
+
+3.1.3.2. Note about transitioning to Stuck state.
+
+On transitioning to the Stuck state, pending downloads MUST be
+cancelled. Any entries newer than the mirror's current TFM which have
+already been merged MAY be kept and ignored in the Stuck state, or MAY
+be discarded; they will be redundantly downloaded and merged in the
+Stuck state's recovery state machine.
+
+3.1.4. Stuck timelines.
+
+A timeline becomes Stuck when it cannot sync properly. This may be due
+to invalid or missing chunks in its present sync range, or if it fails
+to respond to a /chunks request. In this state the mirror first tries
+to fetch a new chunk list from /chunks and then re-downloads and
+verifies each chunk in the sync range serially before merging it.
+
+A mirror SHOULD NOT serve entries from a Stuck timeline, but a mirror
+MAY continue to serve cached responses including its entries for up to
+24 hours. If a timeline remains in the Stuck state for more than 24
+hours, a mirror MUST mark it as Defunct.
+
+A mirror MUST keep a retry timer per Stuck timeline whose interval is
+initially every 2 seconds and doubles upon any failure up to once an
+hour.
+
+After an interval of the retry timer, if the chunk list is empty, the
+mirror MUST attempt to fetch a new chunk list for the last sync range.
+If the sync range is not bounded above, this will be
+/chunks/since/<SN>, otherwise /chunks/between/<SN1>/and/<SN2>.
+
+If the timeline responds and the sync range was previously unbounded
+above, a mirror MUST set up a new chunk list and sync range for the
+timeline. If the sync range was previously bounded above and below,
+the new chunk list is populated, but the sync range is not updated.
+
+If the chunk list is non-empty, the mirror MUST download the oldest
+remaining chunk and then verify and merge it. If download times out
+(as in 3.1.3) or verification or merging fail, the chunk list should
+be cleared and the retry timer reset, so that there will be a full
+interval before the next retry. When a chunk is successfully merged,
+the lower bound of the sync range MUST be updated to the next chunk
+and the interval for the retry timer reset to its initial value.
+
+When the sync range becomes empty, the current TFM is updated to the
+just merged TFM, the sync range and chunk list are reset, and the
+timeline is marked as Idle.
+
+3.1.5. Defunct timelines.
+
+Mirrors MUST NOT serve entries from Defunct timelines nor manage any
+downloads for them. An operator MUST manually review what is going on
+with Defunct timelines and either reinstate them as Stuck or stop
+mirroring them.
+
+3.1.6. Corrupt timelines.
+
+When corruption is detected, a timeline MUST be marked as Corrupt. A
+mirror MUST never serve entries from a Corrupt timeline after it
+becomes Corrupt. It MAY stop mirroring all entries from the timeline,
+but MUST keep evidence of corruption.
+
+3.1.7. Special handling of Unbind entries.
+
+While merging entries, mirrors SHOULD note any Unbind entries. As soon
+as their TFMs are eligible for service, a mirror SHOULD invalidate any
+responses cached for the affected names to minimize latency for
+revokations.
+
+3.1.8. Polling /status.
+
+Separately from their update state machine, mirrors MUST poll /status
+on each timeline every 10 minutes to collect updated TFMs. If a
+timeline does not respond to /status on three attempts in a row, it
+MUST be marked Defunct.
+
+If the /status TFM is invalid or inconsistent with the current TFM for
+a timeline, the timeline MUST be marked Corrupt. If Max-Published-SN
+is the same as for the current TFM from a timeline, the current TFM
+MUST be updated to this new TFM. If the interval between
+Max-Published-Timestamp and Max-Timestamp is longer than 24 hours, a
+timeline has apparently stopped publishing entries and MUST be marked
+as Defunct.
+
+3.1.9. Refreshing cached responses.
+
+A mirror MAY lazily recompute cached responses which reference a stale
+TFM as it has available resources.
+
+Cache entries SHOULD expire about 30 minutes from when computed.
+
+3.2. Name lookup queries.
+
+Mirrors serve name lookup queries to retrieve all the entries related
+to a name on their mirrored timelines. It's important that these
+queries be served with low latency, but also that mirrors be reachable
+through proxies and firewalls and reliable. Mirrors also need to
+synchronize with clients to propagate evidence of corrupt timelines.
+
+Mirrors MUST provide an HTTP interface, and MAY provide an UDP
+interface for name lookups.
+
+Mirrors SHOULD cache responses for common domains. Mirrors MUST check
+that cached responses do not reference Defunct or Corrupt timelines
+before serving them and recompute them if they do. Cache entries
+referencing Corrupt timelines SHOULD be evicted, while Defunct entries
+MAY be stored but MUST not be served.
+
+3.2.1. Query response encoding.
+
+Query responses MUST contain the following in this order encoded using
+the wire protocol (see section 1.5).
+
+a) The mirror timestamp when this response was computed.
+b) The corrupt timeline list in effect for this response (see
+   section 5.1).
+c) TFMs for all relevant valid timelines as of the timestamp.
+d) All entries for <domain name> ordered by "precedes" as of the
+   timestamp for this response (see section 1.4).
+e) A binary signature of the canonical form for this response by
+   the mirror's public key.
+
+If there are no entries for Name on any valid timeline, d) should be
+replaced by an NXDOMAIN message for Name.
+
+3.2.2. UDP query interface.
+
+Mirrors MAY provide a UDP interface on port 8375. Responses longer
+than MAX_UDP_SIZE defined below  MUST be sent over HTTP.
+Realistically, responses spanning more than MAX_UDP_INET_DATAGRAMS
+(TODO: suggest a value) which will travel over the general Internet
+and not e.g. over a reliable LAN, SHOULD be sent over HTTP anyway.
+
+3.2.2.1. Query requests.
+
+Queries are a single UDP datagram with the following fields.
+
+#Bytes Field   Notes
+1      Type    Must be 0.
+32     Hash    SHA-256 of previous response for this domain name, or
+               zeros to force a new lookup.
+1-255  Name    Domain name to query.
+1      -       NUL terminator.
+
+Mirrors SHOULD check to see if they have cached a response matching
+Hash for the given Name. If they have, and it is still valid, they
+SHOULD respond with one datagram containing that Hash (see below) to
+signal it may be re-used. Note that these "up-to-date" responses might
+be replayed by an attacker, but since clients MUST periodically
+invalidate their caches, they will eventually see updates.
+
+3.2.2.2. Query responses.
+
+A mirror MUST NOT respond over UDP if it is not eligible to serve.
+
+Responses might span several UDP datagrams. All datagrams start with
+this header.
+
+#Bytes Field   Notes
+1      Version Encoding for this response. MUST be 0.
+1      #Parts  Number of parts in this response minus one.
+1      Part    Which part is this (0 to #Parts).
+32     Hash    SHA-256 of the current response blob. If this is equal
+               to the Hash from the query, #Parts MUST be 0.
+
+Following the header is part of a binary blob of bytes which encodes
+the response. The SHA-256 hash of the reassembled blob MUST match
+Hash. If Hash does not match, clients should fall back to HTTP.
+
+Each part of the blob may be up to 465 bytes = 576 (min guaranteed
+IPv4 datagram size) - 60 (max IPv4 header) - 16 (UDP header) - 35
+(datagram header). This implies a maximum response payload length
+MAX_UDP_SIZE = 256 * 465 = 119040 bytes. Mirrors MUST NOT respond via
+UDP when the response exceeds this size. Mirrors SHOULD NOT respond
+via UDP to Internet clients when the response exceeds
+MAX_UDP_INET_DATAGRAMS, but MAY choose to respond over UDP if e.g.
+they know the client is on a fast local link with low packet loss.
+
+Mirrors and clients SHOULD consider using zero-copy socket I/O [3].
+
+3.2.3. HTTP interface.
+
+Mirrors MUST provide an HTTP interface, ideally on port 80. The
+interface SHOULD be provided by a fast, lightweight HTTP server which
+MAY relax TCP slow start. Connections SHOULD NOT be persisted. Because
+it's expected that navigation to novel domain names are infrequent for
+a given client, it's probably better to make system resources
+available for more clients than to tie them down for idle connections.
+
+3.2.3.1. /q requests.
+
+Mirrors MUST respond to HTTP GET requests for
+
+  /q/<domain name>/h/<base64 hash>
+
+If a mirror is not eligible to serve, it MUST respond with "503
+Service Unavailable".
+
+If the given base64 SHA-256 hash is still a valid hash of the cached
+response for the domain name, then the mirror MUST respond "304 Not
+Modified". Otherwise it SHOULD respond "200 OK" and send back a
+response with Content-Type: application/octet-stream.
+
+The first 32 bytes of data MUST be a SHA-256 hash, and what follows
+MUST be a signed query response with that hash.
+
+3.2.3.2. /gc requests.
+
+Mirrors MUST respond to HTTP GET requests for /gc with a timestamp, a
+list of timelines they currently know to be corrupt (sec 5.1),
+evidence of corruption for each of these timelines (sec 5.2), signed
+by the mirror's public key. The response code MUST be "200 OK", and
+the response MUST have Content-Type: application/octet-stream.
+
+The response is encoded in wire protocol encoding. The response SHOULD
+be cached and recomputed every few minutes or when the list of corrupt
+timelines changes.
+
+3.2.3.3. /gc/<TID> GET requests.
+
+Mirrors MUST respond to HTTP GET requests for /gc/<TID> with evidence
+that TID is corrupt if they have any.
+
+If TID is unknown to the mirror, the mirror MUST respond "404 Not
+Found". If TID is not known to be corrupt, the mirror MUST respond
+"204 No Content". Otherwise the mirror MUST respond "200 OK" with
+wire protocol encoded evidence of corruption (see section 5.2) signed
+by the mirror's public key.
+
+3.2.3.4. /pc/<TID> POST requests.
+
+Mirrors MUST accept HTTP POST requests to /pc/<TID> where TID is a
+decimal integer TID. These requests are used to report evidence of
+new corruption.
+
+If a mirror is rate limiting /pc requests from a client, it MUST
+return "503 Service Unavailable" without further processing.
+
+If TID is unknown to the mirror, the mirror MUST ignore the request
+and respond "404 Not Found". This may signal that the mirror needs to
+update its client library. If TID is already known to be corrupt, the
+mirror MUST respond "204 No Content".
+
+POST data should be e=<EVIDENCE> where <EVIDENCE> is evidence of
+corruption by timeline TID (see section 5.2), encoded in text and
+application/x-www-form-urlencoded.
+
+Mirrors MUST return "400 Bad Request" if evidence does not parse,
+otherwise 202 Accepted if the evidence is properly encoded. Clients
+may see /gc/<TID> for eventual status.
+
+A mirror MUST check evidence with high priority if it knows about TID
+and does not currently think it is corrupt, but to avoid DoS attacks,
+SHOULD continue serving the timeline until evidence is checked. If TID
+is really corrupt, the mirror must mark it Corrupt, add TID to its
+corrupt timelines list, and invalidate all cached responses from TID.
+It SHOULD proactively refresh cached responses which do not mention
+TID with an updated corruption list.
+
+If evidence does not check and TID is not corrupt, the client may be
+malicious or an attacker or fault may have interfered with the
+transmission of evidence. Mirrors SHOULD 503 /pc requests from clients
+which submit more than 10 invalid requests per day.
+
+3.2.4. HTTPS interface.
+
+Mirrors MAY provide an HTTPS interface with the same semantics as the
+HTTP interface to protect confidentiality and provide more resistance
+to certain attacks. The HTTPS interface SHOULD be on port 443 if
+possible. Note that clients SHOULD NOT attempt to use SK mirrors to
+check the SK for a mirror, so this implies they SHOULD import and pin
+certificates from mirrors directly in some bootstrapping step.
+
+4. Clients.
+
+Clients link the SK client library, which contains an authoritve list
+of timelines and their public keys. They SHOULD be configured to query
+one of several nearby SK mirrors by default.
+
+4.1. Querying mirrors.
+
+When initiating a TLS session, clients SHOULD in parallel query the
+remote domain name on one or more SK mirrors and resolve the resulting
+entries as described below. If the result is that the SK is invalid,
+clients MUST indicate this to the user and MUST break the session.
+Clients MAY attempt to use an alernative route specified in the remote
+domain's Services entry, but MUST prompt the user for explicit consent
+before doing so---in particular the compromised key MAY have been used
+to update Services with a route to a rogue host.
+
+Clients SHOULD cache mirror responses for a name, but to detect
+revokations promptly, cached responses SHOULD be short-lived, at most
+24 hours.
+
+To assist in detecting corruption, clients SHOULD separately persist
+as many timeline entries as they can to local disk. Clients SHOULD
+also persist compressed mirror responses, especially the first
+response from a mirror for a name and responses that include new
+timeline entries.
+
+Mirror responses MAY be encoded by saving their signature, their
+non-timeline entry fields and a list of indices into a local database
+of distinct timeline entries.
+
+4.1.1. Resolving mirror responses.
+
+Clients SHOULD use the following algorithm to probe several mirrors to
+find a fresh enough response. In the typical case, a single mirror
+SHOULD be fresh enough.
+
+TODO: Reformat this pseudocode.
+
+T1 = 24 hours    # No querying necessary if records are fresher than this
+T2 = 48 hours    # 24-48 hours: acceptable, but query proactively
+T3 = 1 week      # Records older than an week are bad news, though we will
+                 # somewhat tolerate a small number of dysfunctional timelines 
+                 # in this state
+T4 = 2 weeks     # Once a few timelines reach this age, we fail open
+
+MAX_DERELICT_TIMELINES=2    # Timelines are derelict if nobody is seeing updates
+                            # from them.  We will tolerate this number of them
+
+N_RETRIES=5      # Number of mirrors to try if we aren't getting fresh enough
+                 # responses
+
+number_fresh=0
+for s in timeline_servers:
+    if s.entries_for_name(name).freshness > getcurrenttime() - T1:
+      number_fresh +=1
+if number_fresh == len(timeline_servers):
+    return SUCCESS
+
+for n in range(N_RETRIES):
+  
+   # START_QUERY_ATTEMPT
+   if len(GOOD_MIRRORS) == 0:
+     return FAILURE
+   m = random.choice(GOOD_MIRRORS) # clients MAY prefer mirrors which are 
+                                   # provided by their ISP or network, or 
+                                   # may select from a global list
+   response = m.query(name)
+   number_fresh_enough = 0
+   number_stale = number_very_stale = 0
+   for s in timeline_servers:
+       s.entries_for_name(name).update_from_response(response)
+       freshness = s.entries_for_name(name).freshness
+       if freshness < m.best_freshness_observed_for_timeline(s):
+           # This mirror just gave us a /less/ fresh response for this name 
+           # than it had done for some other name. Never use it again.
+           GOOD_MIRRORS -= m
+           goto # START_QUERY_ATTEMPT
+
+       lag = getcurrenttime() - freshness
+       if lag < T2:
+           number_fresh_enough += 1
+       else:
+           if lag > T3:
+             number_stale += 1
+           if lag > T4:
+             number_very_stale +=1
+       
+       if (number_fresh_enough >= len(timeline_servers) * 0.8) AND 
+          (number_stale <= MAX_DERELICT_TIMELINES):
+           return SUCCESS
+
+if number_very_stale > MAX_DERELICT_TIMELINES:
+    # If 3 or more non-corrupt timeline servers have not been updated for 2
+    # weeks, we are under successful attack.  Fail open.  
+    return FAILURE
+else:
+    return SUCCESS
+
+Clients MUST check that mirror replies are consistent with persisted
+entries from previous queries. If a mirror provides a response whose
+contents omitted entries for the queried name X that predate the
+relevant freshness messages and are cached by the client, the client
+MUST mark this mirror as corrupt. The client SHOULD store evidence and
+MAY report this corruption to the SK maintainers.
+
+If a response includes an entry with the same serial number but
+different content to a previously seen entry, and its timeline
+signature checks, the client MUST save this evidence, mark the
+timeline corrupt, and post evidence of this corruption to the origin
+mirror.
+
+A mirror MUST also be considered corrupt if a timeline is removed from
+its corrupt timelines list as of a newer timestamp, or if it returns a
+response from a timeline which it also thinks is corrupt.
+
+Even if it has no persisted entries, a client MUST ignore a response
+which shows an inconsistent sequence of events at a single timeline
+according to the consistency rules in section 2.1.3. It is not
+possible to determine in general in this case whether the mirror or
+timeline is corrupt. Clients MUST also ignore malformed responses, and
+MAY stop querying a mirror that regularly provides them.
+
+When a client has found one or more fresh enough mirror responses, it
+may reconstruct the history of entries for the domain name as
+described in section 1.4 and resolve the current status of the entry
+for the domain.
+
+4.1.2. Synchronizing corrupt timelines with mirrors.
+
+If a mirror response includes a corrupt timeline list that does not
+match the client's list, the client MUST attempt to send evidence the
+mirror is missing and hear evidence it is missing from the mirror.
+This SHOULD be a non-blocking background task.
+
+If a mirror states that an unknown TID is corrupt, the client MUST
+ignore that, as it MUST ignore entries from unknown TIDs. Possibly the
+mirror is corrupt, or the client's library is old. If a mirror
+presents invalid evidence of corruption, it MUST be ignored if the
+mirror's signature does not check; if the mirror's signature does
+check, the mirror MUST be marked corrupt.
+
+If a mirror response is missing any corrupt TID(s) known to the
+client, the client MUST POST /pc/<TID> with evidence for each such
+TID. If the mirror replies "204 No Content" or "202 Accepted", a
+client MUST NOT send /pc/<TID> for this TID again. If the mirror
+responds "404", the client should send it evidence again after its
+next query response from the mirror, if the mirror still has not
+registered TID as corrupt.
+
+5. Corruption.
+
+Mirrors check the integrity of timelines, and clients check the
+integrity of timelines and mirrors in the SK system. Mirrors and
+clients MUST detect and report corruption.
+
+5.1. Tracking corrupt timelines.
+
+The SK system maintains a corrupt timeline list. This list is
+serialized in plaintext encoding as a comma-separated list of corrupt
+TIDs (integers) sorted in increasing order by TID. In binary encoding,
+it is as a varint length followed by length varint TIDs, again sorted
+increasing by TID.
+
+5.2. Evidence of corruption.
+
+It is also important that SK clients and mirrors keep evidence of
+corruption, which is a minimal set of inconsistent signed entries. In
+binary encoding, evidence is a concatenated list of messages showing
+corruption, while in plaintext encoding it is the concatenated
+canonical forms of the same entries.
+
+6. Operational procedures.
+
+The SK system requires a central list of timeline servers to be
+maintained. In addition, a list of known mirrors and their public keys
+is kept for convenience. This is done by the "SK maintainers", who are
+commiters entrusted with the client library code.
+
+6.1. Timekeeping.
+
+Timelines, mirrors and clients SHOULD all use NTP to keep their clocks
+reasonably synchronized with UTC. Note implementations may repeat or
+roll back a timestamp during a leap second [4], or may roll it back a
+lot in case of exceptional events. Timelines and mirrors MUST take
+care to ensure that all timestamps they generate are monotonically
+non-decreasing.
+
+6.2. Establishing a new timeline.
+
+The SK maintainers MUST approve a change to the SK client library to
+add a new TID to TADDR mapping for each new timeline. A timeline
+SHOULD NOT begin operating until its TID assignment is committed to
+the SK client library. SK clients and mirrors MUST ignore entries from
+unknown timelines.
+
+6.3. Discontinuing a timeline.
+
+If a timeline becomes corrupt, affected clients and mirrors MUST
+immediately stop trusting it. Clients MAY, and mirrors MUST report
+evidence of corruption to the SK maintainers within 24 hours. The SK
+maintainers MUST publish and verify evidence, flag the corrupt TID in
+the SK client library, and push an update.
+
+If a timeline wishes to discontinue operation, its operators SHOULD
+notify its known mirrors first.
+
+6.4. Establishing a new mirror.
+
+Mirrors MAY notify the SK maintainers of their (domain name, port,
+public key), for possible publication in the "known mirrors" list.
+
+6.5. Discontinuing a mirror.
+
+Clients MUST permanently stop trusting a mirror that becomes corrupt,
+and SHOULD notify the SK maintainers. The SK maintainers MAY accept
+evidence of mirror corruption from clients (TODO: how?), verify and
+publish it (TODO: how?), and remove any mention of corrupt mirrors
+from the "known mirrors" list.
+
+6.6. Updating the client library.
+
+TODO: How?
+
+6.7. Registering a name.
+
+Registrants SHOULD register their name to SK binding on many timelines
+in different regions in case a timeline fails. As the SK system grows,
+they SHOULD also ensure their key is registered on some new timelines.
+
+Note that a name holder SHOULD check that their name is returned by
+one or more mirrors before considering it successfully registered on a
+timeline. Registrants SHOULD keep a copy of a timeline-signed entries
+they expect from each timeline, and also of the signed mirror
+responses including these entries, much as normal SK clients SHOULD.
+This way a name holder MAY check integrity of their names and detect
+corruption before clients are affected.
+
+7. References
+
+TODO: Fill this out.
+
+[1] Sovereign Key Cryptography for Internet Domains
+    https://www.eff.org/sovereign-keys
+[2] Paxos
+[3] Zero-copy I/O
+http://yusufonlinux.blogspot.com/2010/11/data-link-access-and-zero-copy.html
+[4] Unix time
+http://en.wikipedia.org/wiki/Unix_time
