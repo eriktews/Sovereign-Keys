@@ -14,10 +14,15 @@ env.Library(target = 'libsk',
             source = [
                 'libsk/base64.cc',
                 'libsk/mt_random.cc',
+                'libsk/sha.cc',
                 'libsk/varint.cc',
                 ])
 
 envTest.Program(target = 'libsk_tests',
                 source = Glob('libsk/*_unittest.cc'),
-                LIBS = ['libsk', 'pthread', 'gtest', 'gtest_main'],
+                LIBS = ['libsk',
+                        'ssl',
+                        'crypto',
+                        'pthread',
+                        'gtest', 'gtest_main'],
                 LIBPATH = '.')
