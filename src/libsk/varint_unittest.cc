@@ -39,6 +39,8 @@ TEST(VarintTest, Encode) {
   EXPECT_EQ("\x80\x80\x80\x80\x80\x80\x80\x01", Encode(0x2000000000000ULL));
   EXPECT_EQ("\x80\x80\x80\x80\x80\x80\x80\x80\x01",
             Encode(0x100000000000000ULL));
+  EXPECT_EQ("\x80\x80\x80\x80\x80\x80\x80\x80\x80\x01",
+            Encode(0x8000000000000000ULL));
 }
 
 TEST(VarintTest, Decode) {
@@ -53,6 +55,8 @@ TEST(VarintTest, Decode) {
   EXPECT_EQ(0x2000000000000ULL, Decode("\x80\x80\x80\x80\x80\x80\x80\x01"));
   EXPECT_EQ(0x100000000000000ULL,
             Decode("\x80\x80\x80\x80\x80\x80\x80\x80\x01"));
+  EXPECT_EQ(0x8000000000000000ULL,
+            Decode("\x80\x80\x80\x80\x80\x80\x80\x80\x80\x01"));
 }
 
 TEST(VarintTest, Randoms) {
@@ -80,9 +84,10 @@ TEST(VarintTest, DecodeErrors) {
   EXPECT_FALSE(DecodeVarint(string(7, 0x80), &unused));
   EXPECT_FALSE(DecodeVarint(string(8, 0x80), &unused));
   EXPECT_FALSE(DecodeVarint(string(9, 0x80), &unused));
+  EXPECT_FALSE(DecodeVarint(string(10, 0x80), &unused));
 
   // Fail for varints that are too long to represent in 64 bits.
-  EXPECT_FALSE(DecodeVarint("\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x00",
+  EXPECT_FALSE(DecodeVarint("\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x01",
                             &unused));
 }
 }
