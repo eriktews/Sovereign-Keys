@@ -43,3 +43,23 @@ take about 50 seconds on a 3.1 GHz i5 core, with a total size of 4.19 MB. And
 you can embed everything you need to verify the request in 492 bytes, which
 need to be included in the response to the client.
 
+Assume that there are n database entries and m hashes to the signature. One
+might choose m = log_2(n)/2.  A hash tree over the whole database can be
+computed in O(n) time and O(m*2^m) memory by the master and the receiver. This
+only requires a linear read and write over the whole database. Hash functions
+are generally faster than hard disk speeds on most systems. Assuming that it
+takes t_r time to read linearly through the whole database and t_w time, to
+write the whole database, the complete process should be done in less than t_r
++ t_w time.
+
+The performance when it comes to answering requests from clients is a bit more
+difficult to answer. First, I would assume that the for example 65536
+signatures are always cached in memory, so that they can be accessed instantly.
+Without the hash tree, it should be possible to answer every request with a
+single disk-seek. To avoid having to recompute the hash tree up to the
+signature, and to avoid more seeks on the hard disk to read all parts of the
+hash tree, one should store the hash tree together with the entry on the disk.
+This will add another 416 bytes bytes to each entry on the hard disk. As a
+result, there is only a modest increase in storage required and the additional
+data that needs to be embedded in each response, but it will not make the whole
+process much slower.
