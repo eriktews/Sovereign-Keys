@@ -1,0 +1,23 @@
+GTEST_DIR = 'third_party/gtest-1.6.0'
+
+env = Environment(CXXFLAGS = '-Wall -Wextra')
+envTest = Environment(CPPPATH = [GTEST_DIR, GTEST_DIR + '/include'],
+                      CXXFLAGS = '-g -Wall -Wextra')
+
+envTest.Library(target = 'gtest',
+                source = GTEST_DIR + '/src/gtest-all.cc')
+
+envTest.Library(target = 'gtest_main',
+                source = GTEST_DIR + '/src/gtest_main.cc')
+
+env.Library(target = 'libsk',
+            source = [
+                'libsk/base64.cc',
+                'libsk/mt_random.cc',
+                'libsk/varint.cc',
+                ])
+
+envTest.Program(target = 'libsk_tests',
+                source = Glob('libsk/*_unittest.cc'),
+                LIBS = ['libsk', 'pthread', 'gtest', 'gtest_main'],
+                LIBPATH = '.')

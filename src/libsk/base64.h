@@ -1,10 +1,8 @@
 // Copyright 2012 the SK authors. All rights reserved.
 
-#ifndef LIBSK_VARINT_H_
-#define LIBSK_VARINT_H_
+#ifndef LIBSK_BASE64_H_
+#define LIBSK_BASE64_H_
 
-#include <stddef.h>  // for size_t
-#include <stdint.h>
 #include <string>
 
 namespace sk {
@@ -20,4 +18,4 @@ bool DecodeBase64(Slice in, std::string* out);
 
 }  // namespace sk
 
-#endif  // LIBSK_VARINT_H_
+#endif  // LIBSK_BASE64_H_

@@ -40,6 +40,14 @@ class Slice {
       length_ -= num;
     }
 
+    // Consumes and returns the first byte of the slice.
+    uint8_t ConsumeFirst() {
+      const uint8_t value = data_[0];
+      data_++;
+      length_--;
+      return value;
+    }
+
   private:
     Slice() { };
 

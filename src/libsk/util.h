@@ -8,7 +8,6 @@
 namespace sk {
 
 class Slice;
-
 typedef std::pair<Slice, Slice> KeyValue;
 
 // Returns the size of its argument array.
